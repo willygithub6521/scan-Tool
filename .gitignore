@@ -1,0 +1,19 @@
+# --- Python 相關 ---
+__pycache__/          # 排除編譯暫存（你問的這個）
+*.py[cod]             # 排除所有 .pyc, .pyo 檔案
+*$py.class            # 排除 Jython 類別檔
+venv/                 # 排除虛擬環境（我們之前聊過的）
+.venv/                # 另一種常見的虛擬環境命名
+env/
+.env                  # 排除存放 API Key 的環境變數設定檔 (極重要！)
+
+# --- 數據與日誌 ---
+*.log                 # 排除執行過程產生的 Log
+data/*.csv            # 排除抓下來的歷史數據 (如果體積太大)
+data/*.json
+
+# --- 編輯器與系統 ---
+.vscode/              # 排除 VS Code 的個人設定
+.idea/                # 排除 PyCharm 的設定
+.DS_Store             # 排除 macOS 的系統檔案
+Thumbs.db             # 排除 Windows 的系統檔案
