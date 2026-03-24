@@ -59,17 +59,34 @@ elif input_method == "CSV 上傳":
 elif input_method == "FMP 伺服器端進階篩選":
     st.sidebar.markdown("---")
     st.sidebar.subheader("API 篩選參數 (Server-Side)")
-    mkt_cap_min = st.sidebar.number_input("最低市值 (十億 USD)", value=50, min_value=0)
-    price_more_than = st.sidebar.number_input("股價大於 ($)", value=20, min_value=0)
-    sector = st.sidebar.selectbox("產業分類 (可選)", ["", "Technology", "Healthcare", "Financial Services", "Energy", "Consumer Cyclical"])
+    col_mc1, col_mc2 = st.sidebar.columns(2)
+    mkt_cap_min = col_mc1.number_input("最低市值(十億)", value=50.0, step=10.0, min_value=0.0)
+    mkt_cap_max = col_mc2.number_input("最高市值(十億)", value=10000.0, step=100.0, min_value=0.0)
+    
+    col_p1, col_p2 = st.sidebar.columns(2)
+    price_more_than = col_p1.number_input("股價大於 ($)", value=20.0, step=5.0, min_value=0.0)
+    price_lower_than = col_p2.number_input("股價小於 ($)", value=3000.0, step=100.0, min_value=0.0)
+    
+    col_v1, col_v2 = st.sidebar.columns(2)
+    vol_min = col_v1.number_input("最低交易量(萬)", value=100.0, step=50.0, min_value=0.0)
+    vol_max = col_v2.number_input("最高交易量(萬)", value=100000.0, step=1000.0, min_value=0.0)
+    
+    sector = st.sidebar.selectbox("Sector (大板塊)", ["", "Technology", "Healthcare", "Financial Services", "Energy", "Consumer Cyclical"])
+    industry_list = ["", "Semiconductors", "Software - Infrastructure", "Consumer Electronics", "Banks - Diversified", "Biotechnology"]
+    industry = st.sidebar.selectbox("Industry (細分產業)", industry_list)
     limit = st.sidebar.slider("最大返回數量", 10, 200, 30)
     st.sidebar.markdown("---")
     
     if fmp_api_key:
         params = {
             "marketCapMoreThan": int(mkt_cap_min * 1e9),
-            "priceMoreThan": price_more_than,
+            "marketCapLowerThan": int(mkt_cap_max * 1e9) if mkt_cap_max > 0 else 0,
+            "priceMoreThan": int(price_more_than),
+            "priceLowerThan": int(price_lower_than) if price_lower_than > 0 else 0,
+            "volumeMoreThan": int(vol_min * 10000),
+            "volumeLowerThan": int(vol_max * 10000) if vol_max > 0 else 0,
             "sector": sector,
+            "industry": industry,
             "limit": limit
         }
         with st.sidebar:
@@ -89,6 +106,15 @@ st.sidebar.subheader("第二階段：技術面篩選條件 (Client-Side)")
 sma_window = st.sidebar.number_input("SMA 天數", value=50, step=5)
 rsi_limit = st.sidebar.number_input("RSI 上限 (找超賣)", value=30, step=5)
 bb_window = st.sidebar.number_input("布林通道天數", value=20, step=1)
+
+st.sidebar.subheader("第三階段：漲跌幅篩選條件 (Client-Side)")
+min_1d_return = st.sidebar.number_input("單日最低漲幅 (%)", value=-100.0, step=1.0)
+n_days_return = st.sidebar.number_input("前 N 日區間 (天)", value=5, min_value=1, step=1)
+min_nd_return = st.sidebar.number_input(f"{n_days_return}日最低漲幅 (%)", value=-100.0, step=1.0)
+
+st.sidebar.subheader("第四階段：嚴格過濾")
+strict_return_filter = st.sidebar.checkbox("只顯示【漲跌幅】達標的股票", value=False)
+
 
 # --- Main App ---
 if not tickers:
@@ -122,6 +148,10 @@ for i, ticker in enumerate(tickers):
     df = add_bollinger_bands(df, window=bb_window)
     df = add_atr(df, window=14)
     
+    # 計算漲跌幅 (%)
+    df['Return_1d'] = df['Close'].pct_change(1) * 100
+    df[f'Return_{n_days_return}d'] = df['Close'].pct_change(n_days_return) * 100
+    
     # 指標計算完成後，根據使用者選擇的期間進行資料裁切
     days_map = {"1mo": 22, "3mo": 66, "6mo": 130, "1y": 252, "2y": 504, "5y": 1260, "max": 5000}
     timeseries = days_map.get(period, 5000)
@@ -138,6 +168,12 @@ for i, ticker in enumerate(tickers):
     cond_price_sma = latest_data['Close'] > latest_data[f'SMA_{sma_window}']
     cond_rsi = latest_data['RSI_14'] < rsi_limit
     cond_bb_lower = latest_data['Close'] < latest_data[f'BB_Lower_{bb_window}']
+    cond_return_1d = latest_data['Return_1d'] >= min_1d_return
+    cond_return_nd = latest_data[f'Return_{n_days_return}d'] >= min_nd_return
+    
+    # 嚴格過濾機制：如果不達標就直接剔除，不顯示
+    if strict_return_filter and not (cond_return_1d and cond_return_nd):
+        continue
     
     results.append({
         "Ticker": ticker,
@@ -148,9 +184,13 @@ for i, ticker in enumerate(tickers):
         "RSI_14": round(latest_data['RSI_14'], 2),
         f"BB_Lower_{bb_window}": round(latest_data[f'BB_Lower_{bb_window}'], 2),
         "ATR_14": round(latest_data['ATR_14'], 2),
+        "1日漲幅(%)": round(latest_data['Return_1d'], 2),
+        f"{n_days_return}日漲幅(%)": round(latest_data[f'Return_{n_days_return}d'], 2),
         "Price > SMA": "✅" if cond_price_sma else "❌",
         "RSI < Limit": "✅" if cond_rsi else "❌",
-        "Price < BB Lower": "✅" if cond_bb_lower else "❌"
+        "Price < BB Lower": "✅" if cond_bb_lower else "❌",
+        "1日漲幅達標": "✅" if cond_return_1d else "❌",
+        f"{n_days_return}日漲幅達標": "✅" if cond_return_nd else "❌"
     })
 
 my_bar.empty()
