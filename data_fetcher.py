@@ -39,21 +39,28 @@ class YFinanceProvider(DataProvider):
 class FMPProvider(DataProvider):
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.base_url = "https://financialmodelingprep.com/api/v3"
+        self.base_url = "https://financialmodelingprep.com/stable"
 
     def fetch_historical_data(self, ticker: str, period: str = "1y") -> pd.DataFrame:
         # Map Streamlit periods to FMP timeseries lengths (rough approximate trading days)
         days_map = {"1mo": 22, "3mo": 66, "6mo": 130, "1y": 252, "2y": 504, "5y": 1260, "max": 5000}
         timeseries = days_map.get(period, 252)
-        
-        url = f"{self.base_url}/historical-price-full/{ticker}?timeseries={timeseries}&apikey={self.api_key}"
+
+        url = f"{self.base_url}/historical-price-eod/full?symbol={ticker}&apikey={self.api_key}" #&timeseries={timeseries}
         try:
             response = requests.get(url)
             data = response.json()
-            if "historical" not in data:
+            
+            if isinstance(data, dict) and "historical" in data:
+                df = pd.DataFrame(data["historical"])
+            elif isinstance(data, list) and len(data) > 0:
+                df = pd.DataFrame(data)
+            else:
                 return pd.DataFrame()
             
-            df = pd.DataFrame(data["historical"])
+            if df.empty:
+                return pd.DataFrame()
+                
             df['date'] = pd.to_datetime(df['date'])
             df.set_index('date', inplace=True)
             df.sort_index(ascending=True, inplace=True) # Ensure chronological order for rolling metrics
@@ -71,7 +78,7 @@ class FMPProvider(DataProvider):
             return pd.DataFrame()
 
     def fetch_basic_info(self, ticker: str) -> dict:
-        url = f"{self.base_url}/profile/{ticker}?apikey={self.api_key}"
+        url = f"{self.base_url}/profile?symbol={ticker}&apikey={self.api_key}"
         try:
             data = requests.get(url).json()
             if isinstance(data, list) and len(data) > 0:
@@ -86,7 +93,7 @@ class FMPProvider(DataProvider):
 
     def fetch_screener_tickers(self, params: dict) -> list:
         query_string = "&".join(f"{k}={v}" for k, v in params.items() if v)
-        url = f"{self.base_url}/stock-screener?apikey={self.api_key}&{query_string}"
+        url = f"{self.base_url}/company-screener?apikey={self.api_key}&{query_string}"
         try:
             response = requests.get(url)
             data = response.json()
