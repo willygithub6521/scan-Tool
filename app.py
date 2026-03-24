@@ -4,6 +4,11 @@ import plotly.graph_objects as go
 from data_fetcher import get_historical_data, get_basic_info, get_fmp_screener_tickers
 from indicators import add_sma, add_ema, add_rsi, add_macd, add_bollinger_bands, add_atr
 import io
+import os
+from dotenv import load_dotenv
+
+# 載入 .env 檔案中的環境變數
+load_dotenv()
 
 st.set_page_config(page_title="Stock Scanner Tool PRO", layout="wide")
 
@@ -16,13 +21,16 @@ st.sidebar.header("配置與輸入")
 data_source = st.sidebar.selectbox("資料來源", ["Yahoo Finance", "FMP"])
 fmp_api_key = ""
 if data_source == "FMP":
-    fmp_api_key = st.sidebar.text_input("FMP API Key", type="password", help="請輸入 Financial Modeling Prep 提供的 API Key")
-    if not fmp_api_key:
+    # 優先從環境變數 (.env) 讀取，若無則從 st.secrets 讀取
+    default_key = os.getenv("FMP_API_KEY", "")
+    if not default_key:
         try:
-            fmp_api_key = st.secrets.get("FMP_API_KEY", "")
+            default_key = st.secrets.get("FMP_API_KEY", "")
         except Exception:
             pass
             
+    fmp_api_key = st.sidebar.text_input("FMP API Key", value=default_key, type="password", help="請輸入 Financial Modeling Prep 提供的 API Key")
+    
     if not fmp_api_key:
         st.sidebar.warning("需要輸入 FMP API Key 才能取得資料！")
 
@@ -102,7 +110,9 @@ raw_data_dict = {}
 for i, ticker in enumerate(tickers):
     my_bar.progress((i + 1) / len(tickers), text=f"處理中: {ticker} ({i+1}/{len(tickers)})")
     
-    df = get_historical_data(ticker, data_source, period, fmp_api_key)
+    # 確保抓取充足的歷史紀錄以計算技術指標 (例如 SMA_50 原本需要前 50 天資料)
+    # 不論使用者選擇甚麼區間，我們統一請求 "max" 資料，在計算後再進行裁切
+    df = get_historical_data(ticker, data_source, "max", fmp_api_key)
     if df.empty:
         continue
     
@@ -111,6 +121,12 @@ for i, ticker in enumerate(tickers):
     df = add_macd(df)
     df = add_bollinger_bands(df, window=bb_window)
     df = add_atr(df, window=14)
+    
+    # 指標計算完成後，根據使用者選擇的期間進行資料裁切
+    days_map = {"1mo": 22, "3mo": 66, "6mo": 130, "1y": 252, "2y": 504, "5y": 1260, "max": 5000}
+    timeseries = days_map.get(period, 5000)
+    if len(df) > timeseries:
+        df = df.tail(timeseries)
     
     raw_data_dict[ticker] = df
     latest_data = df.iloc[-1]
@@ -194,4 +210,4 @@ with tab3:
     st.subheader("檢視詳細運算資料")
     raw_ticker = st.selectbox("選擇要檢視歷史列的股票", [r['Ticker'] for r in results], key="raw_select")
     raw_df = raw_data_dict[raw_ticker]
-    st.dataframe(raw_df.tail(100).sort_index(ascending=False), use_container_width=True)
+    st.dataframe(raw_df.tail(252).sort_index(ascending=False), use_container_width=True)
