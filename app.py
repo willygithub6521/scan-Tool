@@ -78,7 +78,7 @@ elif input_method == "FMP 伺服器端進階篩選":
     st.sidebar.markdown("---")
     
     if fmp_api_key:
-        params = {
+        st.session_state["fmp_server_params"] = {
             "marketCapMoreThan": int(mkt_cap_min * 1e6),
             "marketCapLowerThan": int(mkt_cap_max * 1e6) if mkt_cap_max > 0 else 0,
             "priceMoreThan": price_more_than,
@@ -89,13 +89,6 @@ elif input_method == "FMP 伺服器端進階篩選":
             "industry": industry,
             "limit": limit
         }
-        with st.sidebar:
-            with st.spinner("📡 正在向 FMP 請求符合條件的標的..."):
-                tickers = get_fmp_screener_tickers(fmp_api_key, params)
-        if tickers:
-            st.sidebar.success(f"成功透過 API 取得 {len(tickers)} 檔股票！")
-        else:
-            st.sidebar.warning("API 篩選找不到任何股票或發生錯誤。")
     else:
         st.sidebar.warning("請先於上方輸入 FMP API Key。")
 
@@ -123,15 +116,30 @@ if "scan_results" not in st.session_state:
     st.session_state["scan_results"] = []
     st.session_state["raw_data_dict"] = {}
 
-
 # --- Main App ---
-if not tickers:
-    st.info("👈 請在左側輸入代碼或進行條件篩選以開始。")
+# 只有在初次未掃描且準備要執行時才檢查
+if not start_scan and not st.session_state.get("scan_results"):
+    st.info("👈 請在左側輸入代碼或進行條件設定，並點擊「開始統一搜尋🚀」以開始。")
     st.stop()
     
 if data_source == "FMP" and not fmp_api_key:
     st.error("您選擇了 FMP 作為資料來源，但尚未提供 API Key。請在左側欄輸入。")
     st.stop()
+
+if start_scan:
+    # 統一再這裡抓取 FMP 伺服器進階篩選清單
+    if input_method == "FMP 伺服器端進階篩選":
+        with st.spinner("📡 正在向 FMP 請求符合條件的標的..."):
+            tickers = get_fmp_screener_tickers(fmp_api_key, st.session_state.get("fmp_server_params", {}))
+        if not tickers:
+            st.warning("API 篩選找不到任何股票或發生錯誤。請放寬條件！")
+            st.stop()
+        else:
+            st.success(f"成功透過 API 取得 {len(tickers)} 檔股票！準備開始深度分析。")
+            
+    if not tickers:
+        st.warning("未提供任何股票代碼。")
+        st.stop()
 
 if start_scan:
     import concurrent.futures
@@ -165,6 +173,11 @@ if start_scan:
                 df = df.tail(timeseries)
             
             latest_data = df.iloc[-1]
+            
+            # 日期過期檢查：排除下市或太老的資料 (超過 7 天視為舊資料)
+            if pd.Timestamp(latest_data.name) < pd.Timestamp.now() - pd.Timedelta(days=7):
+                return None
+                
             info = get_basic_info(ticker, data_source, fmp_api_key)
             company_name = info.get('shortName', ticker)
             sector_info = info.get('sector', 'N/A')
@@ -175,8 +188,8 @@ if start_scan:
             cond_return_1d = latest_data['Return_1d'] >= min_1d_return
             cond_return_nd = latest_data[f'Return_{n_days_return}d'] >= min_nd_return
             
-            if strict_return_filter and not (cond_return_1d and cond_return_nd):
-                return None
+            # 移除提早結束的過濾，保存過濾布林值至 dict 中，稍後端看 checkbox 即時呈現在 UI 上
+            is_strict_passed = bool(cond_return_1d and cond_return_nd)
             
             result_dict = {
                 "Ticker": ticker,
@@ -193,7 +206,8 @@ if start_scan:
                 "RSI < Limit": "✅" if cond_rsi else "❌",
                 "Price < BB Lower": "✅" if cond_bb_lower else "❌",
                 "1日漲幅達標": "✅" if cond_return_1d else "❌",
-                f"{n_days_return}日漲幅達標": "✅" if cond_return_nd else "❌"
+                f"{n_days_return}日漲幅達標": "✅" if cond_return_nd else "❌",
+                "_PassStrict": is_strict_passed
             }
             return {"ticker": ticker, "df": df, "result_dict": result_dict}
         except Exception:
@@ -211,9 +225,16 @@ if start_scan:
             
             # 每累積處理 10 檔或最後一檔時，更新即時顯示 Table
             if completed % 10 == 0 or completed == total:
-                my_bar.progress(completed / total, text=f"並行運算中: {completed}/{total} (發現 {len(temp_results)} 檔達標)")
+                my_bar.progress(completed / total, text=f"並行運算中: {completed}/{total} (發現 {len(temp_results)} 檔過關)")
                 if temp_results:
-                    table_placeholder.dataframe(pd.DataFrame(temp_results), use_container_width=True)
+                    df_live = pd.DataFrame(temp_results)
+                    if strict_return_filter and "_PassStrict" in df_live.columns:
+                        df_live = df_live[df_live["_PassStrict"]]
+                        
+                    if "_PassStrict" in df_live.columns:
+                        df_live = df_live.drop(columns=["_PassStrict"])
+                        
+                    table_placeholder.dataframe(df_live, use_container_width=True)
                     
     # 將完成結果存入 session_state，讓換頁或排序時不需要重跑
     st.session_state["scan_results"] = temp_results
@@ -229,6 +250,20 @@ if not results:
     st.stop()
 
 results_df = pd.DataFrame(results)
+
+# 實踐「嚴格過濾」機制：即時更新 Table！
+if strict_return_filter and not results_df.empty:
+    results_df = results_df[results_df["_PassStrict"]]
+    if results_df.empty:
+        st.warning(f"啟用嚴格過濾後，目前 {len(results)} 檔掃描完成的股票中，沒有任何一檔符合漲幅達標的限制。")
+        st.stop()
+
+# 為了畫面整潔，移除內部追蹤用欄位
+if "_PassStrict" in results_df.columns:
+    results_df = results_df.drop(columns=["_PassStrict"])
+
+# 更新可用於下拉選單的標的清單
+available_tickers = results_df["Ticker"].tolist()
 
 tab1, tab2, tab3 = st.tabs(["📊 篩選結果 (Screener)", "📈 圖表分析 (Interactive Charts)", "🗄️ 原始資料 (Raw Data)"])
 
@@ -247,7 +282,7 @@ with tab2:
     st.subheader("個股技術線圖與指標")
     col1, col2 = st.columns([1, 3])
     with col1:
-        selected_ticker = st.selectbox("選擇股票代碼", [r['Ticker'] for r in results])
+        selected_ticker = st.selectbox("選擇股票代碼", available_tickers)
         show_bb = st.checkbox("顯示布林通道", value=True)
         show_sma = st.checkbox(f"顯示 SMA ({sma_window})", value=True)
         
@@ -277,6 +312,6 @@ with tab2:
 
 with tab3:
     st.subheader("檢視詳細運算資料")
-    raw_ticker = st.selectbox("選擇要檢視歷史列的股票", [r['Ticker'] for r in results], key="raw_select")
+    raw_ticker = st.selectbox("選擇要檢視歷史列的股票", available_tickers, key="raw_select")
     raw_df = raw_data_dict[raw_ticker]
     st.dataframe(raw_df.tail(252).sort_index(ascending=False), use_container_width=True)
