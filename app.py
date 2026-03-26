@@ -60,29 +60,29 @@ elif input_method == "FMP 伺服器端進階篩選":
     st.sidebar.markdown("---")
     st.sidebar.subheader("API 篩選參數 (Server-Side)")
     col_mc1, col_mc2 = st.sidebar.columns(2)
-    mkt_cap_min = col_mc1.number_input("最低市值(十億)", value=50.0, step=10.0, min_value=0.0)
-    mkt_cap_max = col_mc2.number_input("最高市值(十億)", value=10000.0, step=100.0, min_value=0.0)
+    mkt_cap_min = col_mc1.number_input("最低市值(M)", value=1.0, step=1.0, min_value=0.0)
+    mkt_cap_max = col_mc2.number_input("最高市值(M)", value=500.0, step=50.0, min_value=0.0)
     
     col_p1, col_p2 = st.sidebar.columns(2)
-    price_more_than = col_p1.number_input("股價大於 ($)", value=20.0, step=5.0, min_value=0.0)
-    price_lower_than = col_p2.number_input("股價小於 ($)", value=3000.0, step=100.0, min_value=0.0)
+    price_more_than = col_p1.number_input("股價大於 ($)", value=1.0, step=1.0, min_value=0.0)
+    price_lower_than = col_p2.number_input("股價小於 ($)", value=50.0, step=1.0, min_value=0.0)
     
     col_v1, col_v2 = st.sidebar.columns(2)
-    vol_min = col_v1.number_input("最低交易量(萬)", value=100.0, step=50.0, min_value=0.0)
-    vol_max = col_v2.number_input("最高交易量(萬)", value=100000.0, step=1000.0, min_value=0.0)
+    vol_min = col_v1.number_input("最低交易量(萬)", value=10.0, step=10.0, min_value=0.0)
+    vol_max = col_v2.number_input("最高交易量(萬)", value=200.0, step=50.0, min_value=0.0)
     
     sector = st.sidebar.selectbox("Sector (大板塊)", ["", "Technology", "Healthcare", "Financial Services", "Energy", "Consumer Cyclical"])
     industry_list = ["", "Semiconductors", "Software - Infrastructure", "Consumer Electronics", "Banks - Diversified", "Biotechnology"]
     industry = st.sidebar.selectbox("Industry (細分產業)", industry_list)
-    limit = st.sidebar.slider("最大返回數量", 10, 200, 30)
+    limit = st.sidebar.slider("最大返回數量", 10, 1000, 30)
     st.sidebar.markdown("---")
     
     if fmp_api_key:
         params = {
-            "marketCapMoreThan": int(mkt_cap_min * 1e9),
-            "marketCapLowerThan": int(mkt_cap_max * 1e9) if mkt_cap_max > 0 else 0,
-            "priceMoreThan": int(price_more_than),
-            "priceLowerThan": int(price_lower_than) if price_lower_than > 0 else 0,
+            "marketCapMoreThan": int(mkt_cap_min * 1e6),
+            "marketCapLowerThan": int(mkt_cap_max * 1e6) if mkt_cap_max > 0 else 0,
+            "priceMoreThan": price_more_than,
+            "priceLowerThan": price_lower_than if price_lower_than > 0 else 0,
             "volumeMoreThan": int(vol_min * 10000),
             "volumeLowerThan": int(vol_max * 10000) if vol_max > 0 else 0,
             "sector": sector,
@@ -115,6 +115,14 @@ min_nd_return = st.sidebar.number_input(f"{n_days_return}日最低漲幅 (%)", v
 st.sidebar.subheader("第四階段：嚴格過濾")
 strict_return_filter = st.sidebar.checkbox("只顯示【漲跌幅】達標的股票", value=False)
 
+st.sidebar.markdown("---")
+start_scan = st.sidebar.button("開始統一搜尋 🚀", use_container_width=True)
+
+# 初始化 Session State
+if "scan_results" not in st.session_state:
+    st.session_state["scan_results"] = []
+    st.session_state["raw_data_dict"] = {}
+
 
 # --- Main App ---
 if not tickers:
@@ -125,78 +133,99 @@ if data_source == "FMP" and not fmp_api_key:
     st.error("您選擇了 FMP 作為資料來源，但尚未提供 API Key。請在左側欄輸入。")
     st.stop()
 
-st.write(f"**準備進行技術分析掃描清單 ({len(tickers)} 檔)**: " + ", ".join(tickers[:15]) + ("..." if len(tickers)>15 else ""))
+if start_scan:
+    import concurrent.futures
+    st.write(f"**準備進行多執行緒技術分析 ({len(tickers)} 檔)**...")
+    my_bar = st.progress(0, text="準備並行處理...")
+    table_placeholder = st.empty()
+    
+    temp_results = []
+    temp_raw = {}
+    completed = 0
+    total = len(tickers)
+    
+    def process_single_ticker(ticker):
+        try:
+            df = get_historical_data(ticker, data_source, "max", fmp_api_key)
+            if df.empty:
+                return None
+            
+            df = add_sma(df, window=sma_window)
+            df = add_rsi(df, window=14)
+            df = add_macd(df)
+            df = add_bollinger_bands(df, window=bb_window)
+            df = add_atr(df, window=14)
+            
+            df['Return_1d'] = df['Close'].pct_change(1) * 100
+            df[f'Return_{n_days_return}d'] = df['Close'].pct_change(n_days_return) * 100
+            
+            days_map = {"1mo": 22, "3mo": 66, "6mo": 130, "1y": 252, "2y": 504, "5y": 1260, "max": 5000}
+            timeseries = days_map.get(period, 5000)
+            if len(df) > timeseries:
+                df = df.tail(timeseries)
+            
+            latest_data = df.iloc[-1]
+            info = get_basic_info(ticker, data_source, fmp_api_key)
+            company_name = info.get('shortName', ticker)
+            sector_info = info.get('sector', 'N/A')
+            
+            cond_price_sma = latest_data['Close'] > latest_data[f'SMA_{sma_window}']
+            cond_rsi = latest_data['RSI_14'] < rsi_limit
+            cond_bb_lower = latest_data['Close'] < latest_data[f'BB_Lower_{bb_window}']
+            cond_return_1d = latest_data['Return_1d'] >= min_1d_return
+            cond_return_nd = latest_data[f'Return_{n_days_return}d'] >= min_nd_return
+            
+            if strict_return_filter and not (cond_return_1d and cond_return_nd):
+                return None
+            
+            result_dict = {
+                "Ticker": ticker,
+                "Name": company_name,
+                "Sector": sector_info,
+                "Close": round(latest_data['Close'], 2),
+                f"SMA_{sma_window}": round(latest_data[f'SMA_{sma_window}'], 2),
+                "RSI_14": round(latest_data['RSI_14'], 2),
+                f"BB_Lower_{bb_window}": round(latest_data[f'BB_Lower_{bb_window}'], 2),
+                "ATR_14": round(latest_data['ATR_14'], 2),
+                "1日漲幅(%)": round(latest_data['Return_1d'], 2),
+                f"{n_days_return}日漲幅(%)": round(latest_data[f'Return_{n_days_return}d'], 2),
+                "Price > SMA": "✅" if cond_price_sma else "❌",
+                "RSI < Limit": "✅" if cond_rsi else "❌",
+                "Price < BB Lower": "✅" if cond_bb_lower else "❌",
+                "1日漲幅達標": "✅" if cond_return_1d else "❌",
+                f"{n_days_return}日漲幅達標": "✅" if cond_return_nd else "❌"
+            }
+            return {"ticker": ticker, "df": df, "result_dict": result_dict}
+        except Exception:
+            return None
 
-progress_text = f"正在透過 {data_source} 擷取歷史報價與運算技術指標..."
-my_bar = st.progress(0, text=progress_text)
+    # 使用 ThreadPoolExecutor 並行抓取與運算
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        future_to_ticker = {executor.submit(process_single_ticker, t): t for t in tickers}
+        for future in concurrent.futures.as_completed(future_to_ticker):
+            completed += 1
+            res = future.result()
+            if res:
+                temp_results.append(res["result_dict"])
+                temp_raw[res["ticker"]] = res["df"]
+            
+            # 每累積處理 10 檔或最後一檔時，更新即時顯示 Table
+            if completed % 10 == 0 or completed == total:
+                my_bar.progress(completed / total, text=f"並行運算中: {completed}/{total} (發現 {len(temp_results)} 檔達標)")
+                if temp_results:
+                    table_placeholder.dataframe(pd.DataFrame(temp_results), use_container_width=True)
+                    
+    # 將完成結果存入 session_state，讓換頁或排序時不需要重跑
+    st.session_state["scan_results"] = temp_results
+    st.session_state["raw_data_dict"] = temp_raw
+    my_bar.empty()
+    table_placeholder.empty()
 
-results = []
-raw_data_dict = {}
-
-for i, ticker in enumerate(tickers):
-    my_bar.progress((i + 1) / len(tickers), text=f"處理中: {ticker} ({i+1}/{len(tickers)})")
-    
-    # 確保抓取充足的歷史紀錄以計算技術指標 (例如 SMA_50 原本需要前 50 天資料)
-    # 不論使用者選擇甚麼區間，我們統一請求 "max" 資料，在計算後再進行裁切
-    df = get_historical_data(ticker, data_source, "max", fmp_api_key)
-    if df.empty:
-        continue
-    
-    df = add_sma(df, window=sma_window)
-    df = add_rsi(df, window=14)
-    df = add_macd(df)
-    df = add_bollinger_bands(df, window=bb_window)
-    df = add_atr(df, window=14)
-    
-    # 計算漲跌幅 (%)
-    df['Return_1d'] = df['Close'].pct_change(1) * 100
-    df[f'Return_{n_days_return}d'] = df['Close'].pct_change(n_days_return) * 100
-    
-    # 指標計算完成後，根據使用者選擇的期間進行資料裁切
-    days_map = {"1mo": 22, "3mo": 66, "6mo": 130, "1y": 252, "2y": 504, "5y": 1260, "max": 5000}
-    timeseries = days_map.get(period, 5000)
-    if len(df) > timeseries:
-        df = df.tail(timeseries)
-    
-    raw_data_dict[ticker] = df
-    latest_data = df.iloc[-1]
-    
-    info = get_basic_info(ticker, data_source, fmp_api_key)
-    company_name = info.get('shortName', ticker)
-    sector_info = info.get('sector', 'N/A')
-    
-    cond_price_sma = latest_data['Close'] > latest_data[f'SMA_{sma_window}']
-    cond_rsi = latest_data['RSI_14'] < rsi_limit
-    cond_bb_lower = latest_data['Close'] < latest_data[f'BB_Lower_{bb_window}']
-    cond_return_1d = latest_data['Return_1d'] >= min_1d_return
-    cond_return_nd = latest_data[f'Return_{n_days_return}d'] >= min_nd_return
-    
-    # 嚴格過濾機制：如果不達標就直接剔除，不顯示
-    if strict_return_filter and not (cond_return_1d and cond_return_nd):
-        continue
-    
-    results.append({
-        "Ticker": ticker,
-        "Name": company_name,
-        "Sector": sector_info,
-        "Close": round(latest_data['Close'], 2),
-        f"SMA_{sma_window}": round(latest_data[f'SMA_{sma_window}'], 2),
-        "RSI_14": round(latest_data['RSI_14'], 2),
-        f"BB_Lower_{bb_window}": round(latest_data[f'BB_Lower_{bb_window}'], 2),
-        "ATR_14": round(latest_data['ATR_14'], 2),
-        "1日漲幅(%)": round(latest_data['Return_1d'], 2),
-        f"{n_days_return}日漲幅(%)": round(latest_data[f'Return_{n_days_return}d'], 2),
-        "Price > SMA": "✅" if cond_price_sma else "❌",
-        "RSI < Limit": "✅" if cond_rsi else "❌",
-        "Price < BB Lower": "✅" if cond_bb_lower else "❌",
-        "1日漲幅達標": "✅" if cond_return_1d else "❌",
-        f"{n_days_return}日漲幅達標": "✅" if cond_return_nd else "❌"
-    })
-
-my_bar.empty()
+results = st.session_state.get("scan_results", [])
+raw_data_dict = st.session_state.get("raw_data_dict", {})
 
 if not results:
-    st.warning("所有股票都查無歷史資料，無法分析。")
+    st.warning("請設定篩選條件後，點擊左側最下方「開始統一搜尋」按鈕。若已搜尋，可能是未發現符合條件的股票。")
     st.stop()
 
 results_df = pd.DataFrame(results)
