@@ -71,7 +71,7 @@ elif input_method == "FMP 伺服器端進階篩選":
     vol_min = col_v1.number_input("最低交易量(萬)", value=10.0, step=10.0, min_value=0.0)
     vol_max = col_v2.number_input("最高交易量(萬)", value=200.0, step=50.0, min_value=0.0)
     
-    sector = st.sidebar.selectbox("Sector (大板塊)", ["", "Technology", "Healthcare", "Financial Services", "Energy", "Consumer Cyclical"])
+    sector = st.sidebar.selectbox("Sector (大板塊)", ["", "Technology", "Healthcare", "Financial Services", "Energy", "Consumer Cyclical", "Industrials", "Consumer Defensive", "Basic Materials", "Utilities", "Real Estate", "Communication Services"])
     industry_list = ["", "Semiconductors", "Software - Infrastructure", "Consumer Electronics", "Banks - Diversified", "Biotechnology"]
     industry = st.sidebar.selectbox("Industry (細分產業)", industry_list)
     limit = st.sidebar.slider("最大返回數量", 10, 1000, 30)
@@ -154,7 +154,7 @@ if start_scan:
     
     def process_single_ticker(ticker):
         try:
-            df = get_historical_data(ticker, data_source, "max", fmp_api_key)
+            df = get_historical_data(ticker, data_source, "1y", fmp_api_key)
             if df.empty:
                 return None
             
