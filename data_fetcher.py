@@ -98,7 +98,7 @@ class FMPProvider(DataProvider):
             response = requests.get(url)
             data = response.json()
             if isinstance(data, list):
-                return [item['symbol'] for item in data]
+                return [{"symbol": item["symbol"], "companyName": item.get("companyName", item.get("symbol")), "sector": item.get("sector", "N/A")} for item in data if "symbol" in item]
         except Exception as e:
             st.error(f"Error fetching from FMP Screener: {e}")
         return []
@@ -142,7 +142,7 @@ def get_fmp_screener_tickers(api_key: str, params: dict) -> list:
             cp["priceLowerThan"] = round(chunk_p_max, 2)
             chunk_params.append(cp)
             
-        all_tickers = set()
+        all_items = {}
         # 並行發送多個 Screener 請求
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             future_to_cp = {executor.submit(provider.fetch_screener_tickers, cp): cp for cp in chunk_params}
@@ -150,10 +150,11 @@ def get_fmp_screener_tickers(api_key: str, params: dict) -> list:
                 try:
                     res = future.result()
                     if res:
-                        all_tickers.update(res)
+                        for item in res:
+                            all_items[item["symbol"]] = item
                 except Exception:
                     pass
-        return list(all_tickers)
+        return list(all_items.values())
     else:
         # 沒有設定上限，或是條件不構成區間時，回退到單次請求模式
         return provider.fetch_screener_tickers(params)

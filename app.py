@@ -93,7 +93,7 @@ elif input_method == "FMP 伺服器端進階篩選":
         st.sidebar.warning("請先於上方輸入 FMP API Key。")
 
 
-period = st.sidebar.selectbox("資料期間", ["1mo", "3mo", "6mo", "1y", "2y", "5y", "max"], index=3)
+period = st.sidebar.selectbox("資料期間", ["1mo", "3mo", "6mo", "1y", "2y", "5y", "max"], index=5)
 
 st.sidebar.subheader("第二階段：技術面篩選條件 (Client-Side)")
 sma_window = st.sidebar.number_input("SMA 天數", value=50, step=5)
@@ -106,7 +106,8 @@ n_days_return = st.sidebar.number_input("前 N 日區間 (天)", value=5, min_va
 min_nd_return = st.sidebar.number_input(f"{n_days_return}日最低漲幅 (%)", value=-100.0, step=1.0)
 
 st.sidebar.subheader("第四階段：嚴格過濾")
-strict_return_filter = st.sidebar.checkbox("只顯示【漲跌幅】達標的股票", value=False)
+match_logic = st.sidebar.radio("漲跌幅條件交集 logic", ["OR (任一條件達標即可)", "AND (全部條件皆須達標)"], index=0)
+strict_return_filter = st.sidebar.checkbox("啟用嚴格過濾 (只顯示達標股票)", value=False)
 
 st.sidebar.markdown("---")
 start_scan = st.sidebar.button("開始統一搜尋 🚀", use_container_width=True)
@@ -128,9 +129,17 @@ if data_source == "FMP" and not fmp_api_key:
 
 if start_scan:
     # 統一再這裡抓取 FMP 伺服器進階篩選清單
+    st.session_state["ticker_info_cache"] = {}
     if input_method == "FMP 伺服器端進階篩選":
         with st.spinner("📡 正在向 FMP 請求符合條件的標的..."):
-            tickers = get_fmp_screener_tickers(fmp_api_key, st.session_state.get("fmp_server_params", {}))
+            screener_results = get_fmp_screener_tickers(fmp_api_key, st.session_state.get("fmp_server_params", {}))
+            tickers = [item["symbol"] for item in screener_results if "symbol" in item]
+            for item in screener_results:
+                if "symbol" in item:
+                    st.session_state["ticker_info_cache"][item["symbol"]] = {
+                        "shortName": item.get("companyName", item["symbol"]),
+                        "sector": item.get("sector", "N/A")
+                    }
         if not tickers:
             st.warning("API 篩選找不到任何股票或發生錯誤。請放寬條件！")
             st.stop()
@@ -154,15 +163,15 @@ if start_scan:
     
     def process_single_ticker(ticker):
         try:
-            df = get_historical_data(ticker, data_source, "1y", fmp_api_key)
+            df = get_historical_data(ticker, data_source, period, fmp_api_key)
             if df.empty:
                 return None
             
             df = add_sma(df, window=sma_window)
-            df = add_rsi(df, window=14)
-            df = add_macd(df)
-            df = add_bollinger_bands(df, window=bb_window)
-            df = add_atr(df, window=14)
+            # df = add_rsi(df, window=14)
+            # df = add_macd(df)
+            # df = add_bollinger_bands(df, window=bb_window)
+            # df = add_atr(df, window=14)
             
             df['Return_1d'] = df['Close'].pct_change(1) * 100
             df[f'Return_{n_days_return}d'] = df['Close'].pct_change(n_days_return) * 100
@@ -178,18 +187,23 @@ if start_scan:
             if pd.Timestamp(latest_data.name) < pd.Timestamp.now() - pd.Timedelta(days=7):
                 return None
                 
-            info = get_basic_info(ticker, data_source, fmp_api_key)
+            ticker_cache = st.session_state.get("ticker_info_cache", {})
+            if ticker in ticker_cache:
+                info = ticker_cache[ticker]
+            else:
+                info = get_basic_info(ticker, data_source, fmp_api_key)
+            
             company_name = info.get('shortName', ticker)
             sector_info = info.get('sector', 'N/A')
             
             cond_price_sma = latest_data['Close'] > latest_data[f'SMA_{sma_window}']
-            cond_rsi = latest_data['RSI_14'] < rsi_limit
-            cond_bb_lower = latest_data['Close'] < latest_data[f'BB_Lower_{bb_window}']
+            # cond_rsi = latest_data['RSI_14'] < rsi_limit
+            # cond_bb_lower = latest_data['Close'] < latest_data[f'BB_Lower_{bb_window}']
             cond_return_1d = latest_data['Return_1d'] >= min_1d_return
             cond_return_nd = latest_data[f'Return_{n_days_return}d'] >= min_nd_return
             
-            # 移除提早結束的過濾，保存過濾布林值至 dict 中，稍後端看 checkbox 即時呈現在 UI 上
-            is_strict_passed = bool(cond_return_1d and cond_return_nd)
+            # 我們保留初始紀錄，但不依賴它作為最終輸出 (因 UI 改動會全自動復寫)
+            is_strict_passed = bool(cond_return_1d or cond_return_nd)
             
             result_dict = {
                 "Ticker": ticker,
@@ -197,14 +211,9 @@ if start_scan:
                 "Sector": sector_info,
                 "Close": round(latest_data['Close'], 2),
                 f"SMA_{sma_window}": round(latest_data[f'SMA_{sma_window}'], 2),
-                "RSI_14": round(latest_data['RSI_14'], 2),
-                f"BB_Lower_{bb_window}": round(latest_data[f'BB_Lower_{bb_window}'], 2),
-                "ATR_14": round(latest_data['ATR_14'], 2),
+                "Price > SMA": "✅" if cond_price_sma else "❌",
                 "1日漲幅(%)": round(latest_data['Return_1d'], 2),
                 f"{n_days_return}日漲幅(%)": round(latest_data[f'Return_{n_days_return}d'], 2),
-                "Price > SMA": "✅" if cond_price_sma else "❌",
-                "RSI < Limit": "✅" if cond_rsi else "❌",
-                "Price < BB Lower": "✅" if cond_bb_lower else "❌",
                 "1日漲幅達標": "✅" if cond_return_1d else "❌",
                 f"{n_days_return}日漲幅達標": "✅" if cond_return_nd else "❌",
                 "_PassStrict": is_strict_passed
@@ -252,10 +261,46 @@ if not results:
 results_df = pd.DataFrame(results)
 
 # 實踐「嚴格過濾」機制：即時更新 Table！
+# 解耦：當使用者在側邊欄調整 N 日、或漲幅下限時，直接重新計算並覆寫 dataframe
+if not results_df.empty and raw_data_dict:
+    cols_to_drop = [c for c in results_df.columns if "日漲幅" in c or "_PassStrict" in c]
+    results_df = results_df.drop(columns=cols_to_drop, errors='ignore')
+    
+    ret_1d_list, ret_nd_list, pass_1d_list, pass_nd_list, pass_strict_list = [], [], [], [], []
+    
+    for _, row in results_df.iterrows():
+        ticker = row["Ticker"]
+        df = raw_data_dict.get(ticker)
+        
+        if df is not None and not df.empty:
+            r1 = (df['Close'].iloc[-1] / df['Close'].iloc[-2] - 1) * 100 if len(df) >= 2 else 0.0
+            rn = (df['Close'].iloc[-1] / df['Close'].iloc[-1 - n_days_return] - 1) * 100 if len(df) >= n_days_return + 1 else 0.0
+            
+            cond_1d, cond_nd = r1 >= min_1d_return, rn >= min_nd_return
+            is_strict = (cond_1d or cond_nd) if "OR" in match_logic else (cond_1d and cond_nd)
+            
+            ret_1d_list.append(round(r1, 2))
+            ret_nd_list.append(round(rn, 2))
+            pass_1d_list.append("✅" if cond_1d else "❌")
+            pass_nd_list.append("✅" if cond_nd else "❌")
+            pass_strict_list.append(is_strict)
+        else:
+            ret_1d_list.append(0.0)
+            ret_nd_list.append(0.0)
+            pass_1d_list.append("❌")
+            pass_nd_list.append("❌")
+            pass_strict_list.append(False)
+            
+    results_df["1日漲幅(%)"] = ret_1d_list
+    results_df[f"{n_days_return}日漲幅(%)"] = ret_nd_list
+    results_df["1日漲幅達標"] = pass_1d_list
+    results_df[f"{n_days_return}日漲幅達標"] = pass_nd_list
+    results_df["_PassStrict"] = pass_strict_list
+
 if strict_return_filter and not results_df.empty:
     results_df = results_df[results_df["_PassStrict"]]
     if results_df.empty:
-        st.warning(f"啟用嚴格過濾後，目前 {len(results)} 檔掃描完成的股票中，沒有任何一檔符合漲幅達標的限制。")
+        st.warning(f"啟用嚴格過濾後，目前 {len(results)} 檔掃描完成的股票中，沒有任何一檔符合條件。")
         st.stop()
 
 # 為了畫面整潔，移除內部追蹤用欄位
@@ -283,7 +328,7 @@ with tab2:
     col1, col2 = st.columns([1, 3])
     with col1:
         selected_ticker = st.selectbox("選擇股票代碼", available_tickers)
-        show_bb = st.checkbox("顯示布林通道", value=True)
+        show_bb = st.checkbox("顯示布林通道", value=False)
         show_sma = st.checkbox(f"顯示 SMA ({sma_window})", value=True)
         
     with col2:
@@ -298,7 +343,7 @@ with tab2:
             fig.add_trace(go.Scatter(x=chart_df.index, y=chart_df[f'SMA_{sma_window}'], 
                                      line=dict(color='orange', width=2), name=f'SMA {sma_window}'))
         
-        if show_bb:
+        if show_bb and f'BB_Upper_{bb_window}' in chart_df.columns:
             fig.add_trace(go.Scatter(x=chart_df.index, y=chart_df[f'BB_Upper_{bb_window}'], 
                                      line=dict(color='rgba(255,255,255,0.3)', width=1, dash='dot'), name='BB上軌'))
             fig.add_trace(go.Scatter(x=chart_df.index, y=chart_df[f'BB_Lower_{bb_window}'], 
