@@ -58,56 +58,55 @@ elif input_method == "CSV 上傳":
             
 elif input_method == "FMP 伺服器端進階篩選":
     st.sidebar.markdown("---")
-    st.sidebar.subheader("API 篩選參數 (Server-Side)")
-    col_mc1, col_mc2 = st.sidebar.columns(2)
-    mkt_cap_min = col_mc1.number_input("最低市值(M)", value=1.0, step=1.0, min_value=0.0)
-    mkt_cap_max = col_mc2.number_input("最高市值(M)", value=500.0, step=50.0, min_value=0.0)
-    
-    col_p1, col_p2 = st.sidebar.columns(2)
-    price_more_than = col_p1.number_input("股價大於 ($)", value=1.0, step=1.0, min_value=0.0)
-    price_lower_than = col_p2.number_input("股價小於 ($)", value=50.0, step=1.0, min_value=0.0)
-    
-    col_v1, col_v2 = st.sidebar.columns(2)
-    vol_min = col_v1.number_input("最低交易量(萬)", value=10.0, step=10.0, min_value=0.0)
-    vol_max = col_v2.number_input("最高交易量(萬)", value=200.0, step=50.0, min_value=0.0)
-    
-    sector = st.sidebar.selectbox("Sector (大板塊)", ["", "Technology", "Healthcare", "Financial Services", "Energy", "Consumer Cyclical", "Industrials", "Consumer Defensive", "Basic Materials", "Utilities", "Real Estate", "Communication Services"])
-    industry_list = ["", "Semiconductors", "Software - Infrastructure", "Consumer Electronics", "Banks - Diversified", "Biotechnology"]
-    industry = st.sidebar.selectbox("Industry (細分產業)", industry_list)
-    limit = st.sidebar.slider("最大返回數量", 10, 1000, 30)
-    st.sidebar.markdown("---")
-    
-    if fmp_api_key:
-        st.session_state["fmp_server_params"] = {
-            "marketCapMoreThan": int(mkt_cap_min * 1e6),
-            "marketCapLowerThan": int(mkt_cap_max * 1e6) if mkt_cap_max > 0 else 0,
-            "priceMoreThan": price_more_than,
-            "priceLowerThan": price_lower_than if price_lower_than > 0 else 0,
-            "volumeMoreThan": int(vol_min * 10000),
-            "volumeLowerThan": int(vol_max * 10000) if vol_max > 0 else 0,
-            "sector": sector,
-            "industry": industry,
-            "limit": limit
-        }
-    else:
-        st.sidebar.warning("請先於上方輸入 FMP API Key。")
+    with st.sidebar.expander("API 篩選參數 (Server-Side)", expanded=True):
+        col_mc1, col_mc2 = st.columns(2)
+        mkt_cap_min = col_mc1.number_input("最低市值(M)", value=1.0, step=1.0, min_value=0.0)
+        mkt_cap_max = col_mc2.number_input("最高市值(M)", value=500.0, step=50.0, min_value=0.0)
+        
+        col_p1, col_p2 = st.columns(2)
+        price_more_than = col_p1.number_input("股價大於 ($)", value=1.0, step=1.0, min_value=0.0)
+        price_lower_than = col_p2.number_input("股價小於 ($)", value=50.0, step=1.0, min_value=0.0)
+        
+        col_v1, col_v2 = st.columns(2)
+        vol_min = col_v1.number_input("最低交易量(萬)", value=10.0, step=10.0, min_value=0.0)
+        vol_max = col_v2.number_input("最高交易量(萬)", value=200.0, step=50.0, min_value=0.0)
+        
+        sector = st.selectbox("Sector (大板塊)", ["", "Technology", "Healthcare", "Financial Services", "Energy", "Consumer Cyclical", "Industrials", "Consumer Defensive", "Basic Materials", "Utilities", "Real Estate", "Communication Services"])
+        industry_list = ["", "Semiconductors", "Software - Infrastructure", "Consumer Electronics", "Banks - Diversified", "Biotechnology"]
+        industry = st.selectbox("Industry (細分產業)", industry_list)
+        limit = st.slider("最大返回數量", 10, 1000, 30)
+        st.markdown("---")
+        
+        if fmp_api_key:
+            st.session_state["fmp_server_params"] = {
+                "marketCapMoreThan": int(mkt_cap_min * 1e6),
+                "marketCapLowerThan": int(mkt_cap_max * 1e6) if mkt_cap_max > 0 else 0,
+                "priceMoreThan": price_more_than,
+                "priceLowerThan": price_lower_than if price_lower_than > 0 else 0,
+                "volumeMoreThan": int(vol_min * 10000),
+                "volumeLowerThan": int(vol_max * 10000) if vol_max > 0 else 0,
+                "sector": sector,
+                "industry": industry,
+                "limit": limit
+            }
+        else:
+            st.warning("請先於上方輸入 FMP API Key。")
 
 
 period = st.sidebar.selectbox("資料期間", ["1mo", "3mo", "6mo", "1y", "2y", "5y", "max"], index=5)
 
-st.sidebar.subheader("第二階段：技術面篩選條件 (Client-Side)")
-sma_window = st.sidebar.number_input("SMA 天數", value=50, step=5)
-rsi_limit = st.sidebar.number_input("RSI 上限 (找超賣)", value=30, step=5)
-bb_window = st.sidebar.number_input("布林通道天數", value=20, step=1)
+with st.sidebar.expander("技術指標篩選 (Client-Side)", expanded=False):
+    sma_window = st.number_input("SMA 天數", value=50, step=5)
+    # rsi_limit = st.number_input("RSI 上限 (找超賣)", value=30, step=5)
+    # bb_window = st.number_input("布林通道天數", value=20, step=1)
 
-st.sidebar.subheader("第三階段：漲跌幅篩選條件 (Client-Side)")
-min_1d_return = st.sidebar.number_input("單日最低漲幅 (%)", value=-100.0, step=1.0)
-n_days_return = st.sidebar.number_input("前 N 日區間 (天)", value=5, min_value=1, step=1)
-min_nd_return = st.sidebar.number_input(f"{n_days_return}日最低漲幅 (%)", value=-100.0, step=1.0)
+with st.sidebar.expander("漲跌幅篩選 (Client-Side)", expanded=True):
+    min_1d_return = st.number_input("單日最低漲幅 (%)", value=-100.0, step=1.0)
+    n_days_return = st.number_input("前 N 日區間 (天)", value=5, min_value=1, step=1)
+    min_nd_return = st.number_input(f"{n_days_return}日最低漲幅 (%)", value=-100.0, step=1.0)
 
-st.sidebar.subheader("第四階段：嚴格過濾")
-match_logic = st.sidebar.radio("漲跌幅條件交集 logic", ["OR (任一條件達標即可)", "AND (全部條件皆須達標)"], index=0)
-strict_return_filter = st.sidebar.checkbox("啟用嚴格過濾 (只顯示達標股票)", value=False)
+    match_logic = st.radio("漲跌幅條件交集 logic", ["OR (任一條件達標即可)", "AND (全部條件皆須達標)"], index=0)
+    strict_return_filter = st.checkbox("啟用嚴格過濾 (只顯示達標股票)", value=False)
 
 st.sidebar.markdown("---")
 start_scan = st.sidebar.button("開始統一搜尋 🚀", use_container_width=True)
