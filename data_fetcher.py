@@ -91,6 +91,28 @@ class FMPProvider(DataProvider):
             pass
         return {}
 
+    def fetch_aftermarket_quote(self, ticker: str) -> dict:
+        url = f"https://financialmodelingprep.com/stable/aftermarket-quote?symbol={ticker}&apikey={self.api_key}"
+        try:
+            response = requests.get(url)
+            data = response.json()
+            if isinstance(data, list) and len(data) > 0:
+                return data[0]
+        except Exception:
+            pass
+        return {}
+
+    def fetch_news(self, ticker: str, limit: int = 3) -> list:
+        url = f"https://financialmodelingprep.com/stable/news/stock?symbols={ticker}&apikey={self.api_key}"
+        try:
+            response = requests.get(url)
+            data = response.json()
+            if isinstance(data, list):
+                return data[:limit]
+        except Exception:
+            pass
+        return []
+
     def fetch_screener_tickers(self, params: dict) -> list:
         query_string = "&".join(f"{k}={v}" for k, v in params.items() if v)
         url = f"{self.base_url}/company-screener?apikey={self.api_key}&{query_string}"
@@ -158,3 +180,15 @@ def get_fmp_screener_tickers(api_key: str, params: dict) -> list:
     else:
         # 沒有設定上限，或是條件不構成區間時，回退到單次請求模式
         return provider.fetch_screener_tickers(params)
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_aftermarket_quote(ticker: str, provider_name: str, api_key: str = "") -> dict:
+    if provider_name == "FMP":
+        return FMPProvider(api_key).fetch_aftermarket_quote(ticker)
+    return {}
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_stock_news(ticker: str, provider_name: str, api_key: str = "", limit: int = 3) -> list:
+    if provider_name == "FMP":
+        return FMPProvider(api_key).fetch_news(ticker, limit)
+    return []

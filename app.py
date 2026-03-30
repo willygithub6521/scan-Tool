@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from data_fetcher import get_historical_data, get_basic_info, get_fmp_screener_tickers
+from data_fetcher import get_historical_data, get_basic_info, get_fmp_screener_tickers, get_aftermarket_quote, get_stock_news
 from indicators import add_sma, add_ema, add_rsi, add_macd, add_bollinger_bands, add_atr
 import io
 import os
@@ -100,13 +100,17 @@ with st.sidebar.expander("技術指標篩選 (Client-Side)", expanded=False):
     # rsi_limit = st.number_input("RSI 上限 (找超賣)", value=30, step=5)
     # bb_window = st.number_input("布林通道天數", value=20, step=1)
 
-with st.sidebar.expander("漲跌幅篩選 (Client-Side)", expanded=True):
+with st.sidebar.expander("動能漲幅與爆量篩選 (Client-Side)", expanded=True):
     min_1d_return = st.number_input("單日最低漲幅 (%)", value=-100.0, step=1.0)
     n_days_return = st.number_input("前 N 日區間 (天)", value=5, min_value=1, step=1)
     min_nd_return = st.number_input(f"{n_days_return}日最低漲幅 (%)", value=-100.0, step=1.0)
 
     match_logic = st.radio("漲跌幅條件交集 logic", ["OR (任一條件達標即可)", "AND (全部條件皆須達標)"], index=0)
-    strict_return_filter = st.checkbox("啟用嚴格過濾 (只顯示達標股票)", value=False)
+    strict_return_filter = st.checkbox("啟用嚴格過濾 (只顯示漲勢達標)", value=False)
+    
+    st.markdown("---")
+    vol_multiplier = st.number_input("RVOL 異常倍數 (今量 vs 20日均量)", value=20.0, step=1.0)
+    strict_vol_filter = st.checkbox("啟用爆量過濾 (只顯示爆量達標)", value=False)
 
 st.sidebar.markdown("---")
 start_scan = st.sidebar.button("開始統一搜尋 🚀", use_container_width=True)
@@ -262,10 +266,10 @@ results_df = pd.DataFrame(results)
 # 實踐「嚴格過濾」機制：即時更新 Table！
 # 解耦：當使用者在側邊欄調整 N 日、或漲幅下限時，直接重新計算並覆寫 dataframe
 if not results_df.empty and raw_data_dict:
-    cols_to_drop = [c for c in results_df.columns if "日漲幅" in c or "_PassStrict" in c]
+    cols_to_drop = [c for c in results_df.columns if "漲幅" in c or "_PassStrict" in c or "爆量" in c or "RVOL" in c]
     results_df = results_df.drop(columns=cols_to_drop, errors='ignore')
     
-    ret_1d_list, ret_nd_list, pass_1d_list, pass_nd_list, pass_strict_list = [], [], [], [], []
+    ret_1d_list, ret_nd_list, pass_1d_list, pass_nd_list, pass_strict_list, pass_vol_list, rvol_list = [], [], [], [], [], [], []
     
     for _, row in results_df.iterrows():
         ticker = row["Ticker"]
@@ -275,6 +279,11 @@ if not results_df.empty and raw_data_dict:
             r1 = (df['Close'].iloc[-1] / df['Close'].iloc[-2] - 1) * 100 if len(df) >= 2 else 0.0
             rn = (df['Close'].iloc[-1] / df['Close'].iloc[-1 - n_days_return] - 1) * 100 if len(df) >= n_days_return + 1 else 0.0
             
+            vol_sma_20 = df['Volume'].rolling(window=20).mean().iloc[-1] if len(df) >= 20 else 0
+            vol_today = df['Volume'].iloc[-1]
+            rvol = (vol_today / vol_sma_20) if vol_sma_20 > 0 else 0.0
+            cond_vol = rvol >= vol_multiplier
+            
             cond_1d, cond_nd = r1 >= min_1d_return, rn >= min_nd_return
             is_strict = (cond_1d or cond_nd) if "OR" in match_logic else (cond_1d and cond_nd)
             
@@ -283,18 +292,25 @@ if not results_df.empty and raw_data_dict:
             pass_1d_list.append("✅" if cond_1d else "❌")
             pass_nd_list.append("✅" if cond_nd else "❌")
             pass_strict_list.append(is_strict)
+            pass_vol_list.append("✅" if cond_vol else "❌")
+            rvol_list.append(round(rvol, 2))
         else:
             ret_1d_list.append(0.0)
             ret_nd_list.append(0.0)
             pass_1d_list.append("❌")
             pass_nd_list.append("❌")
             pass_strict_list.append(False)
+            pass_vol_list.append("❌")
+            rvol_list.append(0.0)
             
     results_df["1日漲幅(%)"] = ret_1d_list
     results_df[f"{n_days_return}日漲幅(%)"] = ret_nd_list
     results_df["1日漲幅達標"] = pass_1d_list
     results_df[f"{n_days_return}日漲幅達標"] = pass_nd_list
+    results_df["RVOL (倍)"] = rvol_list
+    results_df["爆量達標"] = pass_vol_list
     results_df["_PassStrict"] = pass_strict_list
+    results_df["_PassStrictVol"] = [ v == "✅" for v in pass_vol_list ]
 
 if strict_return_filter and not results_df.empty:
     results_df = results_df[results_df["_PassStrict"]]
@@ -302,14 +318,20 @@ if strict_return_filter and not results_df.empty:
         st.warning(f"啟用嚴格過濾後，目前 {len(results)} 檔掃描完成的股票中，沒有任何一檔符合條件。")
         st.stop()
 
+if strict_vol_filter and not results_df.empty:
+    results_df = results_df[results_df["_PassStrictVol"]]
+    if results_df.empty:
+        st.warning(f"啟用爆量過濾後，查無任何符合倍數條件的爆量股票。")
+        st.stop()
+
 # 為了畫面整潔，移除內部追蹤用欄位
-if "_PassStrict" in results_df.columns:
-    results_df = results_df.drop(columns=["_PassStrict"])
+cols_to_drop_final = [c for c in results_df.columns if "_PassStrict" in c]
+results_df = results_df.drop(columns=cols_to_drop_final, errors='ignore')
 
 # 更新可用於下拉選單的標的清單
 available_tickers = results_df["Ticker"].tolist()
 
-tab1, tab2, tab3 = st.tabs(["📊 篩選結果 (Screener)", "📈 圖表分析 (Interactive Charts)", "🗄️ 原始資料 (Raw Data)"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 篩選結果 (Screener)", "📈 圖表分析 (Interactive Charts)", "🗄️ 原始資料 (Raw Data)", "🔥 潛在股深度解析 (Watchlist Deep Dive)"])
 
 with tab1:
     st.subheader("分析結果總表")
@@ -359,3 +381,42 @@ with tab3:
     raw_ticker = st.selectbox("選擇要檢視歷史列的股票", available_tickers, key="raw_select")
     raw_df = raw_data_dict[raw_ticker]
     st.dataframe(raw_df.tail(252).sort_index(ascending=False), use_container_width=True)
+
+with tab4:
+    st.subheader("進階觀察清單 (盤後報價與最新新聞)")
+    st.markdown("針對第一階段已經成為潛在飆股的標的，進行第二步的**深度解析 (Deep Dive)** 獲取盤後與催化劑資訊。")
+    if not available_tickers:
+        st.info("目前沒有符合篩選條件的潛在股。")
+    else:
+        selected_watchlist = st.selectbox("選擇要深度解析的潛在股", available_tickers, key="watchlist_select")
+        
+        if st.button(f"🔍 載入 {selected_watchlist} 進階資訊", key=f"fetch_deep_{selected_watchlist}"):
+            with st.spinner(f"正在拉取 {selected_watchlist} 的盤後數據與新聞..."):
+                quote = get_aftermarket_quote(selected_watchlist, data_source, fmp_api_key)
+                news_list = get_stock_news(selected_watchlist, data_source, fmp_api_key, limit=3)
+
+                st.markdown(f"### 🌙 盤後報價 (After-Market)")
+                if quote and "Error" not in str(quote) and "change" in quote:
+                    price = round(quote.get("price", 0.0), 2)
+                    change = round(quote.get("change", 0.0), 2)
+                    changes_pct = round(quote.get("changesPercentage", 0.0), 2)
+                    st.metric("盤後最新報價", f"${price}", f"{change} ({changes_pct}%)")
+                else:
+                    st.warning("查無此檔盤後報價。(目前 Starter Plan 或該標的不支援盤後即時報價)")
+                    
+                st.markdown("---")
+                st.markdown(f"### 📰 最近催化劑 (News Top 3)")
+                if news_list and "Error Message" not in str(news_list):
+                    for article in news_list:
+                        pub_date = article.get('publishedDate', 'Unknown Date')
+                        site = article.get('site', 'Unknown Resource')
+                        title = article.get('title', 'No Title')
+                        url = article.get('url', '#')
+                        text = article.get('text', '')[:200] + "..."
+                        
+                        st.markdown(f"**[{title}]({url})**")
+                        st.caption(f"發布時間: {pub_date} - 來源: {site}")
+                        st.write(text)
+                        st.markdown("---")
+                else:
+                    st.info("查無近期相關新聞。")
