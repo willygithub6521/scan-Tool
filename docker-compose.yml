@@ -1,0 +1,9 @@
+services:
+  scan-tool:
+    build: .
+    container_name: scan-tool-app
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    restart: unless-stopped
