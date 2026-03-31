@@ -3,4 +3,3 @@ pandas>=2.0.0
 yfinance>=0.2.36
 plotly>=5.18.0
 requests>=2.31.0
-python-dotenv>=1.0.0

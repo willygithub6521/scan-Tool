@@ -12,6 +12,7 @@ __pycache__/
 env/
 # 排除存放 API Key 的環境變數設定檔 (極重要！)
 .env
+.streamlit/secrets.toml
 
 # --- 數據與日誌 ---
 # 排除執行過程產生的 Log

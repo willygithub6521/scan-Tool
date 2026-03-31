@@ -5,10 +5,6 @@ from data_fetcher import get_historical_data, get_basic_info, get_fmp_screener_t
 from indicators import add_sma, add_ema, add_rsi, add_macd, add_bollinger_bands, add_atr
 import io
 import os
-from dotenv import load_dotenv
-
-# 載入 .env 檔案中的環境變數
-load_dotenv()
 
 st.set_page_config(page_title="Stock Scanner Tool PRO", layout="wide")
 
@@ -21,18 +17,16 @@ st.sidebar.header("配置與輸入")
 data_source = st.sidebar.selectbox("資料來源", ["Yahoo Finance", "FMP"])
 fmp_api_key = ""
 if data_source == "FMP":
-    # 優先從環境變數 (.env) 讀取，若無則從 st.secrets 讀取
-    default_key = os.getenv("FMP_API_KEY", "")
-    if not default_key:
-        try:
-            default_key = st.secrets.get("FMP_API_KEY", "")
-        except Exception:
-            pass
+    # 統一使用 Streamlit 官方推薦的 st.secrets 讀取金鑰 (無縫支援 Streamlit Cloud)
+    try:
+        default_key = st.secrets.get("FMP_API_KEY", "")
+    except Exception:
+        default_key = ""
             
-    fmp_api_key = st.sidebar.text_input("FMP API Key", value=default_key, type="password", help="請輸入 Financial Modeling Prep 提供的 API Key")
+    fmp_api_key = st.sidebar.text_input("FMP API Key", value=default_key, type="password", help="請輸入 Financial Modeling Prep 提供的 API Key。本機開發請配置於 .streamlit/secrets.toml")
     
     if not fmp_api_key:
-        st.sidebar.warning("需要輸入 FMP API Key 才能取得資料！")
+        st.sidebar.warning("需要填寫 FMP API Key 才能取得資料！")
 
 # 支持多種輸入方式
 input_methods = ["手動輸入", "CSV 上傳"]
