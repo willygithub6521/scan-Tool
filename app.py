@@ -113,6 +113,8 @@ start_scan = st.sidebar.button("開始統一搜尋 🚀", use_container_width=Tr
 if "scan_results" not in st.session_state:
     st.session_state["scan_results"] = []
     st.session_state["raw_data_dict"] = {}
+if "saved_history" not in st.session_state:
+    st.session_state["saved_history"] = {}
 
 # --- Main App ---
 # 只有在初次未掃描且準備要執行時才檢查
@@ -325,17 +327,26 @@ results_df = results_df.drop(columns=cols_to_drop_final, errors='ignore')
 # 更新可用於下拉選單的標的清單
 available_tickers = results_df["Ticker"].tolist()
 
-tab1, tab2, tab3, tab4 = st.tabs(["📊 篩選結果 (Screener)", "📈 圖表分析 (Interactive Charts)", "🗄️ 原始資料 (Raw Data)", "🔥 潛在股深度解析 (Watchlist Deep Dive)"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 篩選結果 (Screener)", "📈 圖表分析 (Interactive Charts)", "🗄️ 原始資料 (Raw Data)", "🔥 潛在股深度解析 (Watchlist)", "🗂️ 歷史庫存 (Saved Scans)"])
 
 with tab1:
     st.subheader("分析結果總表")
-    csv = results_df.to_csv(index=False).encode('utf-8-sig')
-    st.download_button(
-        label="📥 匯出結果 (CSV)",
-        data=csv,
-        file_name='screener_results.csv',
-        mime='text/csv',
-    )
+    col_a, col_b = st.columns([1, 1])
+    with col_a:
+        csv = results_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button(
+            label="📥 匯出結果 (CSV)",
+            data=csv,
+            file_name='screener_results.csv',
+            mime='text/csv',
+        )
+    with col_b:
+        if st.button("💾 儲存本次結果至無塵歷史庫存", use_container_width=True):
+            import datetime
+            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            st.session_state["saved_history"][now_str] = results_df.copy()
+            st.success(f"已成功將 {len(results_df)} 檔潛在股儲存至「歷史庫存」標籤頁！")
+            
     st.dataframe(results_df, use_container_width=True)
 
 with tab2:
@@ -414,3 +425,43 @@ with tab4:
                         st.markdown("---")
                 else:
                     st.info("查無近期相關新聞。")
+
+with tab5:
+    st.subheader("🗂️ 歷次掃描與自選股保存庫")
+    st.markdown("不管你在左邊怎麼重新送出新條件，這裡的紀錄**永遠不會被洗掉**。你可以透過方案 B 多次小範圍篩選，把每次的精華留存在這裡！")
+    
+    saved_history = st.session_state.get("saved_history", {})
+    if not saved_history:
+        st.info("目前還沒有儲存任何標的。請在「篩選結果」標籤頁中點擊【💾 儲存本次結果至無塵歷史庫存】！")
+    else:
+        history_keys = list(saved_history.keys())
+        # 讓最新儲存的放在最上面
+        history_keys.reverse()
+        
+        selected_hist = st.selectbox("📅 選擇要檢視的歷史掃描時間", history_keys)
+        hist_df = saved_history[selected_hist]
+        
+        st.metric("該次保存檔數", f"{len(hist_df)} 檔股票")
+        st.dataframe(hist_df, use_container_width=True)
+        
+        col_c, col_d = st.columns([1, 1])
+        with col_c:
+            if st.button("🗑️ 刪除此筆紀錄", key=f"del_{selected_hist}", use_container_width=True):
+                del st.session_state["saved_history"][selected_hist]
+                st.rerun()
+        with col_d:
+            if st.button("🧨 清空所有歷史紀錄", key="del_all", use_container_width=True):
+                st.session_state["saved_history"] = {}
+                st.rerun()
+                
+        st.markdown("---")
+        st.markdown("### 🌟 所有歷史紀錄合併總覽 (Ultimate Watchlist)")
+        all_df = pd.concat(saved_history.values(), ignore_index=True)
+        # 以 Ticker 代碼進行去重，保留最新抓到的版本
+        all_df = all_df.drop_duplicates(subset=["Ticker"], keep="first")
+        
+        st.metric("合併去重後總庫存", f"{len(all_df)} 檔股票")
+        st.dataframe(all_df, use_container_width=True)
+        
+        csv_all = all_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 匯出終極合併總表 (CSV)", csv_all, "ultimate_watchlist.csv", "text/csv")
