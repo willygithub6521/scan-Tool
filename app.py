@@ -5,6 +5,7 @@ from data_fetcher import get_historical_data, get_basic_info, get_fmp_screener_t
 from indicators import add_sma, add_ema, add_rsi, add_macd, add_bollinger_bands, add_atr
 import io
 import os
+import numpy as np
 
 st.set_page_config(page_title="Stock Scanner Tool PRO", layout="wide")
 
@@ -327,7 +328,7 @@ results_df = results_df.drop(columns=cols_to_drop_final, errors='ignore')
 # 更新可用於下拉選單的標的清單
 available_tickers = results_df["Ticker"].tolist()
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 篩選結果 (Screener)", "📈 圖表分析 (Interactive Charts)", "🗄️ 原始資料 (Raw Data)", "🔥 潛在股深度解析 (Watchlist)", "🗂️ 歷史庫存 (Saved Scans)"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 篩選結果 (Screener)", "📈 圖表分析 (Interactive Charts)", "🗄️ 原始資料 (Raw Data)", "🔥 潛在股深度解析 (Watchlist)", "🗂️ 歷史庫存 (Saved Scans)", "🧪 策略回測 (Backtest)", "🤖 專業事件回測 (Backtrader)"])
 
 with tab1:
     st.subheader("分析結果總表")
@@ -465,3 +466,282 @@ with tab5:
         
         csv_all = all_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button("📥 匯出終極合併總表 (CSV)", csv_all, "ultimate_watchlist.csv", "text/csv")
+
+with tab6:
+    st.subheader("🧪 向量化回測實驗室 (Vectorized Backtester)")
+    st.markdown("在這裡您可以自由切換並驗證不同的量化交易模型。")
+    
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        # 從歷史庫存中獲取所有 Ticker 作為選項
+        hist_tickers = []
+        saved_hist_dict = st.session_state.get("saved_history", {})
+        for df_h in saved_hist_dict.values():
+            if "Ticker" in df_h.columns:
+                hist_tickers.extend(df_h["Ticker"].tolist())
+        hist_tickers = list(set(hist_tickers))
+        hist_tickers.sort()
+        target_ticker = st.selectbox("1. 選擇左方掃描過或歷史庫存標的", [""] + available_tickers + hist_tickers)
+        
+    with col_t2:
+        custom_ticker = st.text_input("2. 或自行手動輸入股票代碼 (優先套用)", value="")
+        
+    run_ticker = custom_ticker.upper().strip() if custom_ticker else target_ticker
+    
+    st.markdown("---")
+    strategy_choice = st.radio("選擇回測策略模型", ["極端暴漲當沖放空 (Gap-Up Momentum Short)", "雙均線黃金交叉做多 (Dual SMA Crossover)"], horizontal=True)
+    
+    st.markdown("#### ⚙️ 策略參數")
+    
+    if "極端" in strategy_choice:
+        st.info("💡 **無未來函數宣告**：純日線當沖。當 `T-1 與 T-2 日` 滿足暴漲條件時，於 `T日 開盤價` 模擬放空，並在 `T日 收盤價` 強制回補。")
+        col_p1, col_p2 = st.columns(2)
+        cond1_pct = col_p1.number_input("條件 1: 前日單日總漲幅大於 (%)", value=90.0, step=10.0)
+        cond2_pct = col_p2.number_input("條件 2: 前日K棒實體 (開到收) 漲幅大於 (%)", value=70.0, step=10.0)
+    else:
+        st.info("💡 **無未來函數宣告**：波段做多策略。每日收盤結算均線，當 `快線向上突破慢線`，於 `隔日 (T+1)` 起始持有部位賺取每日漲跌報酬，死亡交叉則平倉。")
+        col_p1, col_p2 = st.columns(2)
+        sma_fast = col_p1.number_input("快線周期 (Fast SMA)", value=20, step=5, min_value=1)
+        sma_slow = col_p2.number_input("慢線周期 (Slow SMA)", value=60, step=5, min_value=2)
+    
+    if run_ticker and st.button(f"▶️ 針對 {run_ticker} 執行策略回測", use_container_width=True):
+        with st.spinner("擷取過去 5 年歷史數據並進行向量演算中..."):
+            bt_data = get_historical_data(run_ticker, period="5y", provider_name=data_source, api_key=fmp_api_key)
+            
+            if bt_data is None or bt_data.empty:
+                st.error("無法取得該標的之歷史連續資料。")
+            else:
+                bt_df = bt_data.copy()
+                
+                # ==== 策略分流計算 ====
+                if "極端" in strategy_choice:
+                    bt_df['Prev_Close'] = bt_df['Close'].shift(1)
+                    bt_df['Prev_Prev_Close'] = bt_df['Close'].shift(2)
+                    bt_df['Prev_Open'] = bt_df['Open'].shift(1)
+                    
+                    bt_df['Cond1_Val'] = (bt_df['Prev_Close'] / bt_df['Prev_Prev_Close'] - 1) * 100
+                    bt_df['Cond2_Val'] = (bt_df['Prev_Close'] / bt_df['Prev_Open'] - 1) * 100
+                    
+                    bt_df['Signal'] = np.where(
+                        (bt_df['Cond1_Val'] >= cond1_pct) & (bt_df['Cond2_Val'] >= cond2_pct), 
+                        1, 0
+                    )
+                    bt_df['Daily_Trade_Return'] = np.where(bt_df['Signal'] == 1, (bt_df['Open'] - bt_df['Close']) / bt_df['Open'], 0)
+                
+                else:
+                    # 雙均線計算
+                    bt_df['Fast_SMA'] = bt_df['Close'].rolling(window=int(sma_fast)).mean()
+                    bt_df['Slow_SMA'] = bt_df['Close'].rolling(window=int(sma_slow)).mean()
+                    
+                    # 訊號 1 = 持有部位, 0 = 空倉
+                    bt_df['Signal'] = np.where(bt_df['Fast_SMA'] > bt_df['Slow_SMA'], 1, 0)
+                    bt_df['Daily_Return'] = bt_df['Close'].pct_change()
+                    
+                    # 遞延 1 天享受報酬 (預防未來函數)
+                    bt_df['Daily_Trade_Return'] = bt_df['Signal'].shift(1) * bt_df['Daily_Return']
+                    bt_df['Daily_Trade_Return'] = bt_df['Daily_Trade_Return'].fillna(0)
+                
+                # ==== 績效結算 ====
+                bt_df['Cumulative_Return'] = (1 + bt_df['Daily_Trade_Return']).cumprod() - 1
+                bt_df['BnH_Return'] = bt_df['Close'].pct_change()
+                bt_df['BnH_Cumulative'] = (1 + bt_df['BnH_Return']).cumprod() - 1
+                
+                total_trades = bt_df['Signal'].sum()
+                
+                if total_trades > 0:
+                    win_trades = (bt_df['Daily_Trade_Return'] > 0).sum()
+                    if "極端" in strategy_choice:
+                        # 當沖是每一次 Signal 代表 1 次獨立 Trade
+                        actual_trades = total_trades
+                    else:
+                        # 波段是持有的日子算入勝率較難單純算"次數"，這裡改算"持有天數中，賺錢的勝率"
+                        actual_trades = total_trades 
+                        
+                    win_rate = (win_trades / actual_trades) * 100
+                    total_ret = bt_df['Cumulative_Return'].iloc[-1] * 100
+                    
+                    running_max = (1 + bt_df['Cumulative_Return']).cummax()
+                    drawdown = (1 + bt_df['Cumulative_Return']) / running_max - 1
+                    mdd = drawdown.min() * 100
+                    
+                    active_returns = bt_df[bt_df['Daily_Trade_Return'] != 0]['Daily_Trade_Return']
+                    sharpe = (active_returns.mean() / active_returns.std() * np.sqrt(252)) if len(active_returns) > 1 and active_returns.std() > 0 else 0
+                    
+                    if "極端" in strategy_choice:
+                        st.success(f"回測完成！統計近五年內，共觸發此極端訊號 {int(actual_trades)} 次。")
+                    else:
+                        st.success(f"回測完成！統計近五年內，共有 {int(actual_trades)} 天處於持倉做多狀態。")
+                        
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("累積總報酬率 (無本金)", f"{total_ret:.2f}%")
+                    c2.metric("最大資金回撤 (MDD)", f"{mdd:.2f}%")
+                    c3.metric("勝率 (獲利日比率)", f"{win_rate:.1f}%", f"{int(win_trades)}/{int(actual_trades)} 日")
+                    c4.metric("夏普比率 (年化)", f"{sharpe:.2f}")
+                    
+                    fig = go.Figure()
+                    trace_name = '極端放空策略' if "極端" in strategy_choice else '均線做多策略'
+                    trace_color = '#00ff00' if "極端" in strategy_choice else '#00BFFF'
+                    
+                    fig.add_trace(go.Scatter(x=bt_df.index, y=bt_df['Cumulative_Return']*100, mode='lines', name=trace_name, line=dict(color=trace_color, width=2)))
+                    fig.add_trace(go.Scatter(x=bt_df.index, y=bt_df['BnH_Cumulative']*100, mode='lines', name='單純買入持有 (B&H)', line=dict(color='gray', dash='dot')))
+                    fig.update_layout(title=f"資金成長對比 ({run_ticker})", hovermode="x unified", template="plotly_dark", yaxis_ticksuffix="%")
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    with st.expander("查看進出訊號明細 (Trade Logs)"):
+                        if "極端" in strategy_choice:
+                            details = bt_df[bt_df['Signal'] == 1][['Open', 'Close', 'Cond1_Val', 'Cond2_Val', 'Daily_Trade_Return']]
+                            details.columns = ['開盤空點(出)', '收盤補點(進)', '前日單日總漲幅(%)', '前日K棒實體漲幅(%)', '當沖獲利(%)']
+                            details['當沖獲利(%)'] = details['當沖獲利(%)'] * 100
+                            st.dataframe(details.style.format(precision=2))
+                        else:
+                            bt_df['Position_Change'] = bt_df['Signal'].diff()
+                            trade_events = bt_df[bt_df['Position_Change'] != 0].copy()
+                            trade_events = trade_events.dropna(subset=['Position_Change'])
+                            
+                            details = trade_events[['Close', 'Fast_SMA', 'Slow_SMA', 'Position_Change']]
+                            details['動作'] = np.where(details['Position_Change'] == 1, "↗️ 做多 (Buy)", "↘️ 空倉 (Sell)")
+                            details = details.drop(columns=['Position_Change'])
+                            details.columns = ['觸發價(當日Close)', f'快線({sma_fast})', f'慢線({sma_slow})', '明日起部位動作']
+                            st.dataframe(details.style.format(precision=2))
+                else:
+                    if "極端" in strategy_choice:
+                        st.warning(f"在此回測的 5 年期間內，沒有任何一天觸發這麼嚴苛的暴力漲幅條件！您可以試著將前日漲幅 ({cond1_pct}%) / 實體漲幅 ({cond2_pct}%) 的門檻調低看看。")
+                    else:
+                        st.warning("在此期間內條件從未滿足。請調整均線區間。")
+
+with tab7:
+    st.subheader("🤖 專業事件回測 (Backtrader Engine)")
+    st.markdown("透過真實交易所模擬器 (`Backtrader`)，精確驗算含手續費、初始部位與時間推進下的絕對績效。此頁面運算邏輯已完全模組化分離，保障系統效能。")
+    
+    col_bt1, col_bt2 = st.columns([1, 1])
+    with col_bt1:
+        st.markdown("#### 1. 資料庫選擇")
+        bt_source = st.radio("您要用什麼數據餵食給大腦引擎？", ["使用內建掃描庫存", "自行上傳外部自備 CSV (無數量限制)"], horizontal=True)
+        
+        target_df = None
+        target_name = ""
+        
+        if "上傳" in bt_source:
+            uploaded_file = st.file_uploader("📥 請上傳 OHLCV 歷史報價檔案 (.csv)", type=['csv'])
+            if uploaded_file is not None:
+                try:
+                    target_df = pd.read_csv(uploaded_file)
+                    target_name = uploaded_file.name
+                    st.success(f"成功載入 CSV：共 {len(target_df)} 筆K線資料")
+                except Exception as e:
+                    st.error(f"解析 CSV 失敗: {e}")
+        else:
+            hist_tickers = []
+            saved_hist_dict = st.session_state.get("saved_history", {})
+            for df_h in saved_hist_dict.values():
+                if "Ticker" in df_h.columns:
+                    hist_tickers.extend(df_h["Ticker"].tolist())
+            hist_tickers = list(set(hist_tickers))
+            hist_tickers.sort()
+            
+            c_tick1, c_tick2 = st.columns(2)
+            sel_tick = c_tick1.selectbox("選擇曾掃描過的標的", [""] + available_tickers + hist_tickers, key="bt_sel")
+            man_tick = c_tick2.text_input("輸入欲即時下載的代碼", key="bt_man")
+            final_tick = man_tick.upper().strip() if man_tick else sel_tick
+            
+            if final_tick:
+                if final_tick in raw_data_dict:
+                    target_df = raw_data_dict[final_tick].copy()
+                else:
+                    with st.spinner("從 API 下載連續報價中..."):
+                        target_df = get_historical_data(final_tick, period="max", provider_name=data_source, api_key=fmp_api_key)
+                target_name = final_tick
+                if target_df is not None:
+                    st.success(f"成功準備 {final_tick}，共 {len(target_df)} 筆K線")
+                
+    with col_bt2:
+        st.markdown("#### 2. 券商環境設定")
+        c_b1, c_b2 = st.columns(2)
+        start_cash = c_b1.number_input("初始資金 ($USD)", value=100000, step=10000)
+        
+        comm_type = c_b2.radio("收費模式", ["百分比 (%)", "固定金額 ($)"], horizontal=True)
+        if "百分比" in comm_type:
+            commission_input = c_b2.number_input("單筆手續費率 (%)", value=0.1, step=0.01)
+            commission_val = commission_input / 100.0
+            is_fixed_comm = False
+        else:
+            commission_input = c_b2.number_input("單筆固定手續費 ($USD)", value=5.0, step=1.0)
+            commission_val = commission_input
+            is_fixed_comm = True
+            
+        st.markdown("#### 3. 策略與部位 (Strategy & Position)")
+        bt_strategy_choice = st.selectbox("選擇核心大腦要搭載的策略邏輯", ["A. 雙均線波段做多 (含動態止盈止損)", "B. 極端暴漲當沖放空 (嚴格隔日收盤回補)"])
+        
+        c_p1, c_p2 = st.columns(2)
+        stake = c_p1.number_input("每次進場股數 (Shares)", value=100, step=10, min_value=1)
+        
+        if "均線" in bt_strategy_choice:
+            bt_fast = c_p1.number_input("快線 (SMA_Fast)", value=20, step=5)
+            bt_slow = c_p2.number_input("慢線 (SMA_Slow)", value=60, step=5)
+            c_sl1, c_sl2 = st.columns(2)
+            tp_pct = c_sl1.number_input("止盈出局目標 (%) - 0為不設", value=15.0, step=1.0, min_value=0.0)
+            sl_pct = c_sl2.number_input("止損出局限制 (%) - 0為不設", value=5.0, step=1.0, min_value=0.0)
+            
+            algo_params = {
+                "strategy": "dual_sma",
+                "sma_fast": bt_fast,
+                "sma_slow": bt_slow,
+                "stake": stake,
+                "tp_pct": tp_pct,
+                "sl_pct": sl_pct
+            }
+        else:
+            cond1 = c_p1.number_input("前日單日總漲幅大於 (%)", value=90.0, step=10.0)
+            cond2 = c_p2.number_input("前日開去收實體漲幅大於 (%)", value=70.0, step=10.0)
+            
+            c_sl1, c_sl2 = st.columns(2)
+            tp_pct = c_sl1.number_input("做空止盈目標 (%) - 0為不設", value=15.0, step=1.0, min_value=0.0, key="b_tp")
+            sl_pct = c_sl2.number_input("做空止損限制 (%) - 0為不設", value=5.0, step=1.0, min_value=0.0, key="b_sl")
+            
+            max_hold = st.number_input("最大持倉天數 (預設1天當沖)", value=1, step=1, min_value=1)
+            
+            algo_params = {
+                "strategy": "momentum_short",
+                "cond1_pct": cond1,
+                "cond2_pct": cond2,
+                "stake": stake,
+                "tp_pct": tp_pct,
+                "sl_pct": sl_pct,
+                "max_hold": max_hold
+            }
+        
+    st.markdown("---")
+    
+    if st.button("🚀 啟動 Backtrader 大腦引擎進行逐日撮合", use_container_width=True):
+        if target_df is None or target_df.empty:
+            st.error("啟動失敗：請先在上方提供有效的歷史報價資料庫！")
+        else:
+            with st.spinner("大腦引擎模擬逐日推進、計算保證金與撮合交易中... (可能耗時數秒)"):
+                try:
+                    from backtrader_engine import run_backtrader
+                    params_dict = {
+                        "starting_cash": start_cash,
+                        "commission_val": commission_val,
+                        "is_fixed_comm": is_fixed_comm,
+                        **algo_params
+                    }
+                    metrics, equity_df = run_backtrader(target_df, params_dict)
+                    
+                    st.success(f"✅ 回測完畢！總計完成 {metrics['total_trades']} 趟完整交易 (買+賣)。")
+                    
+                    m1, m2, m3, m4, m5 = st.columns(5)
+                    m1.metric("初始資金", f"${start_cash:,.2f}")
+                    m2.metric("期末淨值", f"${metrics['final_value']:,.2f}", f"{metrics['total_return_pct']:.2f}%")
+                    m3.metric("最大資金回撤 (MDD)", f"{metrics['mdd_pct']:.2f}%")
+                    m4.metric("交易趟數 (含勝率)", f"{metrics['total_trades']} 趟", f"{metrics['win_rate']:.1f}% 勝")
+                    m5.metric("夏普比率", f"{metrics['sharpe']:.2f}")
+                    
+                    fig_bt = go.Figure()
+                    fig_bt.add_trace(go.Scatter(x=equity_df.index, y=equity_df['Cumulative_Return']*100, mode='lines', name='大腦引擎結算報酬 (%)', fill='tozeroy', line=dict(color='#ff9900')))
+                    fig_bt.update_layout(title=f"真實資金成長曲線 ({target_name})", hovermode="x unified", template="plotly_dark", yaxis_ticksuffix="%")
+                    st.plotly_chart(fig_bt, use_container_width=True)
+                    
+                except ValueError as ve:
+                    st.error(f"資料格式錯誤: {str(ve)}")
+                except Exception as e:
+                    st.error(f"大腦引擎執行時發生預期外的錯誤: {str(e)}")
