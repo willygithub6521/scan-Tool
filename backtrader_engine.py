@@ -12,117 +12,244 @@ class FixedCommInfo(bt.CommInfoBase):
     def _getcommission(self, size, price, pseudoexec):
         return self.p.commission
 
-class MomentumShortStrategy(bt.Strategy):
-    """暴漲放空策略：具備時間停損與動態 SL/TP"""
+class LoggingStrategy(bt.Strategy):
+    def __init__(self):
+        self.trade_logs = []
+        self._open_trade_sizes = {}
+        self.intraday_exit_data = {}
+        
+    def notify_trade(self, trade):
+        if trade.justopened:
+            self._open_trade_sizes[trade.ref] = trade.size
+            self.intraday_exit_data[trade.data] = {}
+            
+        elif trade.isclosed:
+            opened_size = self._open_trade_sizes.pop(trade.ref, trade.size)
+            if opened_size == 0:
+                opened_size = 1  # Fallback to prevent crash, though logic should be sound
+                
+            actual_exit = trade.price + (trade.pnl / opened_size)
+            
+            theo_exit = self.intraday_exit_data.pop(trade.data, {})
+            if theo_exit.get('price'):
+                exit_price = theo_exit['price']
+                status_remark = theo_exit['status']
+                
+                # 計算理論獲利與實際獲利的差異並手動補償券商現金池
+                diff_cash = (actual_exit - exit_price) * abs(opened_size)
+                self.broker.add_cash(diff_cash)
+                
+                final_pnl = trade.pnlcomm + diff_cash
+            else:
+                exit_price = actual_exit
+                status_remark = '收盤強制回補'
+                final_pnl = trade.pnlcomm
+            
+            # 放空毛利率計算： (進場價 - 出場價) / 進場價
+            margin_pct = 0.0
+            if trade.price > 0:
+                if not trade.long: # 放空
+                    margin_pct = (trade.price - exit_price) / trade.price * 100
+                else: # 做多
+                    margin_pct = (exit_price - trade.price) / trade.price * 100
+
+            self.trade_logs.append({
+                '標的': trade.data._name,
+                '進場日期': bt.num2date(trade.dtopen).strftime('%Y-%m-%d'),
+                '出場日期': bt.num2date(trade.dtclose).strftime('%Y-%m-%d'),
+                '方向': '作多' if trade.long else '放空',
+                '進場股數': abs(opened_size),
+                '進場價': round(trade.price, 2),
+                '出場價': round(exit_price, 2),
+                '持倉天數': trade.barlen,
+                '出場備註': status_remark,
+                '淨獲利(USD)': round(final_pnl, 2),
+                '毛利率(%)': round(margin_pct, 2)
+            })
+
+class MomentumShortStrategy(LoggingStrategy):
+    """暴漲放空策略：具備時間停損與動態 SL/TP (支援多標的)"""
     params = (
         ('cond1_pct', 90.0),
         ('cond2_pct', 70.0),
-        ('stake', 100),
+        ('stake_mode', 'shares'),
+        ('stake_val', 100.0),
         ('tp_pct', 0.0),
         ('sl_pct', 0.0),
         ('max_hold', 1),
     )
 
     def __init__(self):
-        self.hold_days = 0
+        super().__init__()
+        self.hold_days = {data: 0 for data in self.datas}
 
     def next(self):
-        if not self.position:
-            if len(self.data) >= 2:
-                ret_t = (self.data.close[0] / self.data.close[-1] - 1.0) * 100.0
-                body_t = (self.data.close[0] / self.data.open[0] - 1.0) * 100.0
+        for data in self.datas:
+            pos = self.getposition(data)
+            if not pos:
+                if len(data) >= 2:
+                    prev_close = data.close[-1]
+                    curr_open = data.open[0]
+                    
+                    if prev_close > 0 and curr_open > 0:
+                        ret_t = (data.close[0] / prev_close - 1.0) * 100.0
+                        body_t = (data.close[0] / curr_open - 1.0) * 100.0
+                        
+                        if ret_t >= self.params.cond1_pct and body_t >= self.params.cond2_pct:
+                            # 這是 T 日收盤時，所以計算出來的漲幅滿足條件！
+                            # 準備在 T+1 日開盤進場放空。
+                            # 股數計算採用 T 日收盤價作為基準 (因為我們還不知道 T+1 的開盤跳空有多大)
+                            price = data.close[0] if data.close[0] > 0 else 1.0
+                            if self.params.stake_mode == 'cash':
+                                size = int(self.params.stake_val // price)
+                                if size == 0: size = 1 # 防呆，至少買1股
+                            else:
+                                size = int(self.params.stake_val)
+                                
+                            # 不得超過當前可用餘額
+                            max_size = int(self.broker.getvalue() // price)
+                            if size > max_size:
+                                size = max_size
+                                
+                            if size > 0:
+                                self.sell(data=data, size=size)
+                                self.hold_days[data] = 0
+            else:
+                self.hold_days[data] += 1
                 
-                if ret_t >= self.params.cond1_pct and body_t >= self.params.cond2_pct:
-                    self.sell(size=self.params.stake)
-                    self.hold_days = 0
-        else:
-            self.hold_days += 1
-            # 做空獲利計算：(賣出價 - 現在收盤價) / 賣出價
-            current_pct = (self.position.price - self.data.close[0]) / self.position.price * 100.0
-            
-            # 停利出場 (Take Profit)
-            if self.params.tp_pct > 0 and current_pct >= self.params.tp_pct:
-                self.close()
-                return
-                
-            # 停損出場 (Stop Loss)
-            if self.params.sl_pct > 0 and current_pct <= -self.params.sl_pct:
-                self.close()
-                return
-                
-            # 時間停損 (最大持有天數)
-            if self.hold_days >= self.params.max_hold:
-                self.close()
-                return
+                # ==== 盤中攔截：暴力掛載修正 ====
+                # 當我們有持倉，檢查盤中極端價格是否碰到停損停利！
+                if data in self.intraday_exit_data and not self.intraday_exit_data[data].get('price'):
+                    open_p, high_p, low_p = data.open[0], data.high[0], data.low[0]
+                    # 進場價以「當日開盤價」作為基準計算 TP/SL
+                    tp_p = open_p * (1 - self.params.tp_pct / 100.0) if self.params.tp_pct > 0 else -1
+                    sl_p = open_p * (1 + self.params.sl_pct / 100.0) if self.params.sl_pct > 0 else 999999
+                    
+                    hit_tp = low_p <= tp_p and tp_p > 0
+                    hit_sl = high_p >= sl_p and sl_p < 999999
+                    
+                    if hit_tp and hit_sl:
+                        self.intraday_exit_data[data] = {'price': sl_p, 'status': '日內觸及止損 (雙觸悲觀認定)'}
+                        self.close(data=data)
+                        continue
+                    elif hit_tp:
+                        self.intraday_exit_data[data] = {'price': tp_p, 'status': '日內觸及止盈'}
+                        self.close(data=data)
+                        continue
+                    elif hit_sl:
+                        self.intraday_exit_data[data] = {'price': sl_p, 'status': '日內觸及止損'}
+                        self.close(data=data)
+                        continue
 
-class DualSMAStrategy(bt.Strategy):
-    """雙均線做多策略，支援動態止盈止損"""
+                # 收盤結算獲利：(賣出價 - 現在收盤價) / 賣出價
+                current_pct = (pos.price - data.close[0]) / pos.price * 100.0 if pos.price > 0 else 0.0
+                
+                # 時間停損 (最大持有天數)
+                if self.hold_days[data] >= self.params.max_hold:
+                    self.close(data=data)
+                    continue
+
+class DualSMAStrategy(LoggingStrategy):
+    """雙均線做多策略，支援動態止盈止損 (支援多標的)"""
     params = (
         ('fast', 20),
         ('slow', 60),
-        ('stake', 100),
+        ('stake_mode', 'shares'),
+        ('stake_val', 100.0),
         ('tp_pct', 15.0),  # Take profit
         ('sl_pct', 5.0),   # Stop loss
     )
 
     def __init__(self):
-        self.fast_sma = bt.indicators.SimpleMovingAverage(self.data.close, period=self.params.fast)
-        self.slow_sma = bt.indicators.SimpleMovingAverage(self.data.close, period=self.params.slow)
-        self.crossover = bt.indicators.CrossOver(self.fast_sma, self.slow_sma)
+        super().__init__()
+        self.crossovers = {}
+        for data in self.datas:
+            fast_sma = bt.indicators.SimpleMovingAverage(data.close, period=self.params.fast)
+            slow_sma = bt.indicators.SimpleMovingAverage(data.close, period=self.params.slow)
+            self.crossovers[data] = bt.indicators.CrossOver(fast_sma, slow_sma)
 
     def next(self):
-        if not self.position:
-            if self.crossover > 0:
-                self.buy(size=self.params.stake)
-        else:
-            # 死亡交叉優先平倉
-            if self.crossover < 0:
-                self.close()
-                return
+        for data in self.datas:
+            pos = self.getposition(data)
+            cross = self.crossovers[data]
+            if not pos:
+                if cross > 0:
+                    price = data.close[0] if data.close[0] > 0 else 1.0
+                    if self.params.stake_mode == 'cash':
+                        size = int(self.params.stake_val // price)
+                    else:
+                        size = int(self.params.stake_val)
+                        
+                    # Prevent going beyond current available cash for long strategy
+                    max_size = int(self.broker.getcash() // price)
+                    if size > max_size:
+                        size = max_size
+                        
+                    if size > 0:
+                        self.buy(data=data, size=size)
+            else:
+                # 死亡交叉優先平倉
+                if cross < 0:
+                    self.close(data=data)
+                    continue
 
-            # 如果沒有死亡交叉，檢查止損止盈
-            current_pct = (self.data.close[0] - self.position.price) / self.position.price * 100.0
-            
-            # 停利出場 (Take Profit)
-            if self.params.tp_pct > 0 and current_pct >= self.params.tp_pct:
-                self.close()
-                return
+                # 如果沒有死亡交叉，檢查止損止盈
+                current_pct = (data.close[0] - pos.price) / pos.price * 100.0 if pos.price > 0 else 0.0
                 
-            # 停損出場 (Stop Loss)
-            if self.params.sl_pct > 0 and current_pct <= -self.params.sl_pct:
-                self.close()
-                return
+                # 停利出場 (Take Profit)
+                if self.params.tp_pct > 0 and current_pct >= self.params.tp_pct:
+                    self.close(data=data)
+                    continue
+                    
+                # 停損出場 (Stop Loss)
+                if self.params.sl_pct > 0 and current_pct <= -self.params.sl_pct:
+                    self.close(data=data)
+                    continue
 
-def run_backtrader(df: pd.DataFrame, params_dict: dict):
-    if not isinstance(df.index, pd.DatetimeIndex):
-        try:
-            if 'Date' in df.columns:
-                df['Date'] = pd.to_datetime(df['Date'])
-                df.set_index('Date', inplace=True)
-            elif 'date' in df.columns:
-                df['date'] = pd.to_datetime(df['date'])
-                df.set_index('date', inplace=True)
-        except Exception:
-            pass
-            
-    mapping = {c: c.lower() for c in df.columns}
-    df = df.rename(columns=mapping)
-    for col in ['open', 'high', 'low', 'close', 'volume']:
-        if col not in df.columns:
-            raise ValueError(f"請確保 CSV 包含欄位: {col}")
-            
-    datafeed = bt.feeds.PandasData(dataname=df, openinterest=-1)
+def run_backtrader(dfs: dict, params_dict: dict):
+    # cheat_on_open enables easier intraday logic if needed later
+    cerebro = bt.Cerebro(cheat_on_open=True)
     
-    cerebro = bt.Cerebro()
-    cerebro.adddata(datafeed)
+    for name, df in dfs.items():
+        if df.empty:
+            continue
+        df_copy = df.copy()
+        
+        if not isinstance(df_copy.index, pd.DatetimeIndex):
+            try:
+                # If index is not datetime, try converting
+                for date_col in ['Date', 'date', 'Timestamp', 'timestamp']:
+                    if date_col in df_copy.columns:
+                        df_copy[date_col] = pd.to_datetime(df_copy[date_col])
+                        df_copy.set_index(date_col, inplace=True)
+                        break
+            except Exception:
+                pass
+                
+        mapping = {c: c.lower() for c in df_copy.columns}
+        df_copy = df_copy.rename(columns=mapping)
+        valid = True
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            if col not in df_copy.columns:
+                valid = False
+                break
+        
+        if valid:
+            # openinterest=-1 means it is not used
+            datafeed = bt.feeds.PandasData(dataname=df_copy, name=name, openinterest=-1)
+            cerebro.adddata(datafeed)
     
+    if not cerebro.datas:
+        raise ValueError("沒有有效的歷史數據供大腦引擎使用！")
+
     # 掛載策略
     if params_dict.get('strategy') == 'momentum_short':
         cerebro.addstrategy(
             MomentumShortStrategy, 
             cond1_pct=float(params_dict.get('cond1_pct', 90.0)),
             cond2_pct=float(params_dict.get('cond2_pct', 70.0)),
-            stake=int(params_dict.get('stake', 100)),
+            stake_mode=params_dict.get('stake_mode', 'shares'),
+            stake_val=float(params_dict.get('stake_val', 100.0)),
             tp_pct=float(params_dict.get('tp_pct', 0.0)),
             sl_pct=float(params_dict.get('sl_pct', 0.0)),
             max_hold=int(params_dict.get('max_hold', 1))
@@ -132,7 +259,8 @@ def run_backtrader(df: pd.DataFrame, params_dict: dict):
             DualSMAStrategy, 
             fast=int(params_dict.get('sma_fast', 20)), 
             slow=int(params_dict.get('sma_slow', 60)),
-            stake=int(params_dict.get('stake', 100)),
+            stake_mode=params_dict.get('stake_mode', 'shares'),
+            stake_val=float(params_dict.get('stake_val', 100.0)),
             tp_pct=float(params_dict.get('tp_pct', 0.0)),
             sl_pct=float(params_dict.get('sl_pct', 0.0))
         )
@@ -186,4 +314,11 @@ def run_backtrader(df: pd.DataFrame, params_dict: dict):
         "sharpe": sharpe
     }
     
-    return metrics, equity_df
+    trade_logs_df = pd.DataFrame(strategy_instance.trade_logs)
+    if not trade_logs_df.empty:
+        trade_logs_df = trade_logs_df.sort_values(by="出場日期").reset_index(drop=True)
+        # reorder columns to put Trade Size in a prominent position
+        cols = ['標的', '進場日期', '出場日期', '方向', '進場股數', '進場價', '出場價', '持倉天數', '出場備註', '淨獲利(USD)', '毛利率(%)']
+        trade_logs_df = trade_logs_df[cols]
+        
+    return metrics, equity_df, trade_logs_df
