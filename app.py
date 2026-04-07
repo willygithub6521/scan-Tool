@@ -579,8 +579,13 @@ with tab6:
                         bt_df['Cond1_Val'] = (bt_df['Prev_Close'] / bt_df['Prev_Prev_Close'] - 1) * 100
                         bt_df['Cond2_Val'] = (bt_df['Prev_Close'] / bt_df['Prev_Open'] - 1) * 100
                         
+                        # 放空跳空防禦：放空那日開盤不得高於昨日收盤
+                        bt_df['Cond3_Val'] = bt_df['Open'] <= bt_df['Prev_Close']
+                        
                         bt_df['Signal'] = np.where(
-                            (bt_df['Cond1_Val'] >= cond1_pct) & (bt_df['Cond2_Val'] >= cond2_pct), 
+                            (bt_df['Cond1_Val'] >= cond1_pct) & 
+                            (bt_df['Cond2_Val'] >= cond2_pct) & 
+                            bt_df['Cond3_Val'], 
                             1, 0
                         )
                         

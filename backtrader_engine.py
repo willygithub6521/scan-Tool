@@ -14,10 +14,16 @@ class FixedCommInfo(bt.CommInfoBase):
 
 class LoggingStrategy(bt.Strategy):
     def prenext(self):
-        # 💡 神級解法：破解 Backtrader 預設的「齊頭式時間等待」限制
-        # 當投資組合內有年輕股票(例如昨天剛上市)時，BT 預設會強迫 AAPL 等它。
+        # 💡 神級解法：破解 Backtrader 預設的「齊頭式時間等待」限制 (收盤結算專用)
         # 呼叫這行就可以讓歷史悠久的標的無痛「提早獨立起跑」！
+        self.next_open()
         self.next()
+
+    # def _next_open(self):
+    #     # 💡 第二道神級解法：破解 Backtrader 在 cheat_on_open 時的刁難 (開盤進場專用)
+    #     # 內建底層會檢查 isvalid()，若有未上市股票就會把整個開盤函數卡死。
+    #     # 覆寫這個強制呼叫，讓 MomentumShortStrategy 的開盤跳空防線能順利作動！
+    #     self.next_open()
 
     def __init__(self):
         self.trade_logs = []
@@ -89,38 +95,43 @@ class MomentumShortStrategy(LoggingStrategy):
         super().__init__()
         self.hold_days = {data: 0 for data in self.datas}
 
-    def next(self):
+    def next_open(self):
         for data in self.datas:
             pos = self.getposition(data)
             if not pos:
-                if len(data) >= 2:
+                # 在 T+1 日開盤檢查：需要 T+1(open), T 日, T-1 日 故至少要 3 根 K 線
+                if len(data) >= 3:
                     prev_close = data.close[-1]
+                    prev_prev_close = data.close[-2]
+                    prev_open = data.open[-1]
                     curr_open = data.open[0]
                     
-                    if prev_close > 0 and curr_open > 0:
-                        ret_t = (data.close[0] / prev_close - 1.0) * 100.0
-                        body_t = (data.close[0] / curr_open - 1.0) * 100.0
+                    if prev_close > 0 and prev_prev_close > 0 and prev_open > 0:
+                        ret_t = (prev_close / prev_prev_close - 1.0) * 100.0
+                        body_t = (prev_close / prev_open - 1.0) * 100.0
                         
                         if ret_t >= self.params.cond1_pct and body_t >= self.params.cond2_pct:
-                            # 這是 T 日收盤時，所以計算出來的漲幅滿足條件！
-                            # 準備在 T+1 日開盤進場放空。
-                            # 股數計算採用 T 日收盤價作為基準 (因為我們還不知道 T+1 的開盤跳空有多大)
-                            price = data.close[0] if data.close[0] > 0 else 1.0
-                            if self.params.stake_mode == 'cash':
-                                size = int(self.params.stake_val // price)
-                                if size == 0: size = 1 # 防呆，至少買1股
-                            else:
-                                size = int(self.params.stake_val)
-                                
-                            # 不得超過當前可用餘額
-                            max_size = int(self.broker.getvalue() // price)
-                            if size > max_size:
-                                size = max_size
-                                
-                            if size > 0:
-                                self.sell(data=data, size=size)
-                                self.hold_days[data] = 0
-            else:
+                            # 關鍵防護：如果放空那日開盤比前一日收盤(暴漲日)還高，就不交易！
+                            if curr_open <= prev_close and curr_open >= 1.0:
+                                price = curr_open if curr_open > 0 else 1.0
+                                if self.params.stake_mode == 'cash':
+                                    size = int(self.params.stake_val // price)
+                                    if size == 0: size = 1 # 防呆
+                                else:
+                                    size = int(self.params.stake_val)
+                                    
+                                max_size = int(self.broker.getvalue() // price)
+                                if size > max_size:
+                                    size = max_size
+                                    
+                                if size > 0:
+                                    self.sell(data=data, size=size)
+                                    self.hold_days[data] = 0
+
+    def next(self):
+        for data in self.datas:
+            pos = self.getposition(data)
+            if pos:
                 self.hold_days[data] += 1
                 
                 # ==== 盤中攔截：暴力掛載修正 ====
@@ -302,22 +313,36 @@ def run_backtrader(dfs: dict, params_dict: dict):
     
     time_return = analyzers.time_return.get_analysis()
     drawdown_info = analyzers.drawdown.get_analysis()
-    trades_info = analyzers.trades.get_analysis()
+    # trades_info = analyzers.trades.get_analysis()
     sharpe_info = analyzers.sharpe.get_analysis()
     
     equity_df = pd.DataFrame(list(time_return.items()), columns=['Date', 'Daily_Return'])
     equity_df.set_index('Date', inplace=True)
     equity_df['Cumulative_Return'] = (1 + equity_df['Daily_Return']).cumprod() - 1
     
-    total_trades = trades_info.total.closed if hasattr(trades_info, 'total') and 'closed' in trades_info.total else 0
-    if total_trades > 0 and hasattr(trades_info, 'won'):
-        win_rate = (trades_info.won.total / total_trades) * 100
-    else:
-        win_rate = 0.0
-        
+    # total_trades = trades_info.total.closed if hasattr(trades_info, 'total') and 'closed' in trades_info.total else 0
+    # if total_trades > 0 and hasattr(trades_info, 'won'):
+    #     win_rate = (trades_info.won.total / total_trades) * 100
+    # else:
+    #     win_rate = 0.0
+    
     sharpe = sharpe_info.get('sharperatio', 0.0)
     sharpe = sharpe if sharpe is not None else 0.0
     
+    trade_logs_df = pd.DataFrame(strategy_instance.trade_logs)
+    
+    if not trade_logs_df.empty:
+        trade_logs_df = trade_logs_df.sort_values(by="出場日期").reset_index(drop=True)
+        cols = ['標的', '進場日期', '出場日期', '方向', '進場股數', '進場價', '出場價', '持倉天數', '出場備註', '淨獲利(USD)', '毛利率(%)']
+        trade_logs_df = trade_logs_df[cols]
+        
+        total_trades = len(trade_logs_df)
+        won_trades = len(trade_logs_df[trade_logs_df['淨獲利(USD)'] > 0])
+        win_rate = (won_trades / total_trades) * 100 if total_trades > 0 else 0.0
+    else:
+        total_trades = 0
+        win_rate = 0.0
+        
     metrics = {
         "final_value": final_value,
         "total_return_pct": (final_value / params_dict.get('starting_cash', 100000) - 1) * 100,
@@ -327,11 +352,11 @@ def run_backtrader(dfs: dict, params_dict: dict):
         "sharpe": sharpe
     }
     
-    trade_logs_df = pd.DataFrame(strategy_instance.trade_logs)
-    if not trade_logs_df.empty:
-        trade_logs_df = trade_logs_df.sort_values(by="出場日期").reset_index(drop=True)
-        # reorder columns to put Trade Size in a prominent position
-        cols = ['標的', '進場日期', '出場日期', '方向', '進場股數', '進場價', '出場價', '持倉天數', '出場備註', '淨獲利(USD)', '毛利率(%)']
-        trade_logs_df = trade_logs_df[cols]
-        
+    # trade_logs_df = pd.DataFrame(strategy_instance.trade_logs)
+    # if not trade_logs_df.empty:
+    #     trade_logs_df = trade_logs_df.sort_values(by="出場日期").reset_index(drop=True)
+    #     # reorder columns to put Trade Size in a prominent position
+    #     cols = ['標的', '進場日期', '出場日期', '方向', '進場股數', '進場價', '出場價', '持倉天數', '出場備註', '淨獲利(USD)', '毛利率(%)']
+    #     trade_logs_df = trade_logs_df[cols]
+    
     return metrics, equity_df, trade_logs_df
