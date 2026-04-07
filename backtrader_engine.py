@@ -13,6 +13,12 @@ class FixedCommInfo(bt.CommInfoBase):
         return self.p.commission
 
 class LoggingStrategy(bt.Strategy):
+    def prenext(self):
+        # 💡 神級解法：破解 Backtrader 預設的「齊頭式時間等待」限制
+        # 當投資組合內有年輕股票(例如昨天剛上市)時，BT 預設會強迫 AAPL 等它。
+        # 呼叫這行就可以讓歷史悠久的標的無痛「提早獨立起跑」！
+        self.next()
+
     def __init__(self):
         self.trade_logs = []
         self._open_trade_sizes = {}
@@ -170,8 +176,15 @@ class DualSMAStrategy(LoggingStrategy):
 
     def next(self):
         for data in self.datas:
+            # 💡 因為透過 prenext() 提早解除封印了，必須手動檢查每檔股票的 K 線長度
+            # 是否已經超過均線所需的「最慢天數」，否則指標還沒算出來會噴錯！
+            if len(data) <= self.params.slow:
+                continue
+                
             pos = self.getposition(data)
-            cross = self.crossovers[data]
+            # 安全讀取跨界訊號 (指標保證已暖機完成)
+            cross = self.crossovers[data][0]
+            
             if not pos:
                 if cross > 0:
                     price = data.close[0] if data.close[0] > 0 else 1.0
