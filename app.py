@@ -12,64 +12,63 @@ st.set_page_config(page_title="Stock Scanner Tool PRO", layout="wide")
 st.title("📈 Stock Scanner Tool (Phase 3 + Screener API)")
 
 # --- Sidebar ---
-st.sidebar.header("配置與輸入")
-
-# 資料來源選擇
-data_source = st.sidebar.selectbox("資料來源", ["Yahoo Finance", "FMP"])
-fmp_api_key = ""
-if data_source == "FMP":
-    # 統一使用 Streamlit 官方推薦的 st.secrets 讀取金鑰 (無縫支援 Streamlit Cloud)
-    try:
-        default_key = st.secrets.get("FMP_API_KEY", "")
-    except Exception:
-        default_key = ""
-            
-    fmp_api_key = st.sidebar.text_input("FMP API Key", value=default_key, type="password", help="請輸入 Financial Modeling Prep 提供的 API Key。本機開發請配置於 .streamlit/secrets.toml")
-    
-    if not fmp_api_key:
-        st.sidebar.warning("需要填寫 FMP API Key 才能取得資料！")
-
-# 支持多種輸入方式
-input_methods = ["手動輸入", "CSV 上傳"]
-if data_source == "FMP":
-    input_methods.append("FMP 伺服器端進階篩選")
-    
-input_method = st.sidebar.radio("目標股票產生方式", input_methods)
-
-tickers = []
-if input_method == "手動輸入":
-    tickers_input = st.sidebar.text_area("輸入股票代碼 (逗號或換行分隔)", "AAPL\nMSFT\nGOOGL\nNVDA\nTSLA")
-    tickers_input_clean = tickers_input.replace('\n', ',')
-    tickers = [t.strip().upper() for t in tickers_input_clean.split(",") if t.strip()]
-    
-elif input_method == "CSV 上傳":
-    uploaded_file = st.sidebar.file_uploader("上傳含有股票代碼的 CSV 檔案 (第一欄必須為代碼)", type=["csv"])
-    if uploaded_file is not None:
+with st.sidebar.expander("基礎配置與輸入", expanded=True):
+    # 資料來源選擇 (預設為 FMP)
+    data_source = st.selectbox("資料來源", ["Yahoo Finance", "FMP"], index=1)
+    fmp_api_key = ""
+    if data_source == "FMP":
+        # 統一使用 Streamlit 官方推薦的 st.secrets 讀取金鑰 (無縫支援 Streamlit Cloud)
         try:
-            df_upload = pd.read_csv(uploaded_file, header=None)
-            tickers = [str(t).strip().upper() for t in df_upload.iloc[:, 0].dropna().tolist() if str(t).strip()]
-        except Exception as e:
-            st.sidebar.error("讀取檔案失敗，請確保是有效的 CSV 檔案！")
-            
-elif input_method == "FMP 伺服器端進階篩選":
-    st.sidebar.markdown("---")
-    with st.sidebar.expander("API 篩選參數 (Server-Side)", expanded=True):
+            default_key = st.secrets.get("FMP_API_KEY", "")
+        except Exception:
+            default_key = ""
+                
+        fmp_api_key = st.text_input("FMP API Key", value=default_key, type="password", help="請輸入 Financial Modeling Prep 提供的 API Key。本機開發請配置於 .streamlit/secrets.toml")
+        
+        if not fmp_api_key:
+            st.warning("需要填寫 FMP API Key 才能取得資料！")
+
+    # 支持多種輸入方式
+    input_methods = ["手動輸入", "CSV 上傳"]
+    if data_source == "FMP":
+        input_methods.append("FMP 伺服器端進階篩選")
+        
+    default_idx = 2 if data_source == "FMP" else 0
+    input_method = st.radio("目標股票產生方式", input_methods, index=default_idx)
+
+    tickers = []
+    if input_method == "手動輸入":
+        tickers_input = st.text_area("輸入股票代碼 (逗號或換行分隔)", "AAPL\nMSFT\nGOOGL\nNVDA\nTSLA")
+        tickers_input_clean = tickers_input.replace('\n', ',')
+        tickers = [t.strip().upper() for t in tickers_input_clean.split(",") if t.strip()]
+        
+    elif input_method == "CSV 上傳":
+        uploaded_file = st.file_uploader("上傳含有股票代碼的 CSV 檔案 (第一欄必須為代碼)", type=["csv"])
+        if uploaded_file is not None:
+            try:
+                df_upload = pd.read_csv(uploaded_file, header=None)
+                tickers = [str(t).strip().upper() for t in df_upload.iloc[:, 0].dropna().tolist() if str(t).strip()]
+            except Exception as e:
+                st.error("讀取檔案失敗，請確保是有效的 CSV 檔案！")
+                
+    elif input_method == "FMP 伺服器端進階篩選":
+        st.markdown("---")
         col_mc1, col_mc2 = st.columns(2)
-        mkt_cap_min = col_mc1.number_input("最低市值(M)", value=1.0, step=1.0, min_value=0.0)
+        mkt_cap_min = col_mc1.number_input("最低市值(M)", value=0.0, step=1.0, min_value=0.0)
         mkt_cap_max = col_mc2.number_input("最高市值(M)", value=500.0, step=50.0, min_value=0.0)
         
         col_p1, col_p2 = st.columns(2)
         price_more_than = col_p1.number_input("股價大於 ($)", value=1.0, step=1.0, min_value=0.0)
-        price_lower_than = col_p2.number_input("股價小於 ($)", value=50.0, step=1.0, min_value=0.0)
+        price_lower_than = col_p2.number_input("股價小於 ($)", value=5.0, step=1.0, min_value=0.0)
         
         col_v1, col_v2 = st.columns(2)
-        vol_min = col_v1.number_input("最低交易量(萬)", value=10.0, step=10.0, min_value=0.0)
-        vol_max = col_v2.number_input("最高交易量(萬)", value=200.0, step=50.0, min_value=0.0)
+        vol_min = col_v1.number_input("最低交易量(M)", value=1.0, step=1.0, min_value=0.0)
+        vol_max = col_v2.number_input("最高交易量(M)", value=500.0, step=50.0, min_value=0.0)
         
         sector = st.selectbox("Sector (大板塊)", ["", "Technology", "Healthcare", "Financial Services", "Energy", "Consumer Cyclical", "Industrials", "Consumer Defensive", "Basic Materials", "Utilities", "Real Estate", "Communication Services"])
         industry_list = ["", "Semiconductors", "Software - Infrastructure", "Consumer Electronics", "Banks - Diversified", "Biotechnology"]
         industry = st.selectbox("Industry (細分產業)", industry_list)
-        limit = st.slider("最大返回數量", 10, 1000, 30)
+        limit = st.slider("最大返回數量", 10, 1000, 1000)
         st.markdown("---")
         
         if fmp_api_key:
@@ -78,8 +77,8 @@ elif input_method == "FMP 伺服器端進階篩選":
                 "marketCapLowerThan": int(mkt_cap_max * 1e6) if mkt_cap_max > 0 else 0,
                 "priceMoreThan": price_more_than,
                 "priceLowerThan": price_lower_than if price_lower_than > 0 else 0,
-                "volumeMoreThan": int(vol_min * 10000),
-                "volumeLowerThan": int(vol_max * 10000) if vol_max > 0 else 0,
+                "volumeMoreThan": int(vol_min * 1e6),
+                "volumeLowerThan": int(vol_max * 1e6) if vol_max > 0 else 0,
                 "sector": sector,
                 "industry": industry,
                 "limit": limit
@@ -87,8 +86,7 @@ elif input_method == "FMP 伺服器端進階篩選":
         else:
             st.warning("請先於上方輸入 FMP API Key。")
 
-
-period = st.sidebar.selectbox("資料期間", ["1mo", "3mo", "6mo", "1y", "2y", "5y", "max"], index=5)
+    period = st.selectbox("資料期間", ["1mo", "3mo", "6mo", "1y", "2y", "5y", "max"], index=4)
 
 with st.sidebar.expander("技術指標篩選 (Client-Side)", expanded=False):
     sma_window = st.number_input("SMA 天數", value=50, step=5)
@@ -96,9 +94,9 @@ with st.sidebar.expander("技術指標篩選 (Client-Side)", expanded=False):
     # bb_window = st.number_input("布林通道天數", value=20, step=1)
 
 with st.sidebar.expander("動能漲幅與爆量篩選 (Client-Side)", expanded=True):
-    min_1d_return = st.number_input("單日最低漲幅 (%)", value=-100.0, step=1.0)
+    min_1d_return = st.number_input("單日最低漲幅 (%)", value=50.0, step=1.0)
     n_days_return = st.number_input("前 N 日區間 (天)", value=5, min_value=1, step=1)
-    min_nd_return = st.number_input(f"{n_days_return}日最低漲幅 (%)", value=-100.0, step=1.0)
+    min_nd_return = st.number_input(f"{n_days_return}日最低漲幅 (%)", value=50.0, step=1.0)
 
     match_logic = st.radio("漲跌幅條件交集 logic", ["OR (任一條件達標即可)", "AND (全部條件皆須達標)"], index=0)
     strict_return_filter = st.checkbox("啟用嚴格過濾 (只顯示漲勢達標)", value=False)
@@ -110,7 +108,7 @@ with st.sidebar.expander("動能漲幅與爆量篩選 (Client-Side)", expanded=T
     strict_history_filter = st.checkbox("啟用歷史暴漲過濾 (獨立篩選)", value=False)
     
     st.markdown("---")
-    vol_multiplier = st.number_input("RVOL 異常倍數 (今量 vs 20日均量)", value=20.0, step=1.0)
+    vol_multiplier = st.number_input("RVOL 異常倍數 (今量 vs 20日均量)", value=10.0, step=1.0)
     strict_vol_filter = st.checkbox("啟用爆量過濾 (只顯示爆量達標)", value=False)
 
 st.sidebar.markdown("---")
