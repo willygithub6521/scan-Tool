@@ -360,3 +360,214 @@ def run_backtrader(dfs: dict, params_dict: dict):
     #     trade_logs_df = trade_logs_df[cols]
     
     return metrics, equity_df, trade_logs_df
+
+
+# =====================================================================
+# 5min 線精確回測引擎 (C 策略 — 獨立模組，不影響上方的日線策略)
+# =====================================================================
+
+class Logging5minStrategy(bt.Strategy):
+    """分鐘線通用日誌父類別：使用原生訂單，不需 add_cash 補償"""
+    def prenext(self):
+        # 💡 破解 Backtrader 預設的「齊頭式時間等待」限制 (收盤結算專用)
+        # 呼叫這行就可以讓歷史悠久的標的無痛「提早獨立起跑」！
+        self.next()
+
+    def __init__(self):
+        self.trade_logs = []
+        self._open_sizes = {}
+
+    def notify_trade(self, trade):
+        if trade.justopened:
+            self._open_sizes[trade.ref] = trade.size
+        elif trade.isclosed:
+            opened_size = self._open_sizes.pop(trade.ref, 1) # 防呆預設 1
+            exit_price = trade.price + (trade.pnl / opened_size)
+            margin_pct = 0.0
+            if trade.price > 0:
+                if not trade.long:
+                    margin_pct = (trade.price - exit_price) / trade.price * 100
+                else:
+                    margin_pct = (exit_price - trade.price) / trade.price * 100
+            self.trade_logs.append({
+                '標的': trade.data._name,
+                '進場時間': bt.num2date(trade.dtopen).strftime('%Y-%m-%d %H:%M'),
+                '出場時間': bt.num2date(trade.dtclose).strftime('%Y-%m-%d %H:%M'),
+                '方向': '作多' if trade.long else '放空',
+                '進場股數': abs(opened_size),
+                '進場價': round(trade.price, 4),
+                '出場價': round(exit_price, 4),
+                '持倉根數': trade.barlen,
+                '淨獲利(USD)': round(trade.pnlcomm, 2),
+                '毛利率(%)': round(margin_pct, 2)
+            })
+
+
+class MomentumShort5minStrategy(Logging5minStrategy):
+    """
+    5分鐘線精確放空策略：
+    - 每個交易日 09:30 第一根 K 棒以市價做空進場
+    - 同時掛出 Limit 止盈單與 Stop 止損單 (OCO 對)
+    - 若當天 ≥15:55 前沒有觸發，收盤強制市價平倉
+    """
+    params = (
+        ('stake_mode', 'shares'),
+        ('stake_val', 100.0),
+        ('tp_pct', 15.0),
+        ('sl_pct', 5.0),
+    )
+
+    def __init__(self):
+        super().__init__()
+        self._entered_today = {}
+        self._pending_tp = {}
+        self._pending_sl = {}
+
+    def _cancel_exit_orders(self, data):
+        for order_dict in [self._pending_tp, self._pending_sl]:
+            o = order_dict.pop(data, None)
+            if o and o.status in [o.Created, o.Submitted, o.Accepted, o.Partial]:
+                self.cancel(o)
+
+    def next(self):
+        import datetime
+        for data in self.datas:
+            if len(data) == 0:
+                continue
+                
+            pos = self.getposition(data)
+            bar_time = data.datetime.time(0)
+            bar_date = data.datetime.date(0)
+
+            if not pos:
+                # 只要時間 >= 09:30 且今日還沒進場過，就執行一次 (可覆蓋到第一根 K 是 9:35 的股票)
+                if bar_time >= datetime.time(9, 30):
+                    if self._entered_today.get(data) != bar_date:
+                        price = data.close[0]
+                        if price <= 0:
+                            continue
+
+                        if self.params.stake_mode == 'cash':
+                            size = int(self.params.stake_val // price)
+                        else:
+                            size = int(self.params.stake_val)
+
+                        max_size = int(self.broker.getvalue() // price)
+                        size = min(size, max_size)
+                        if size <= 0:
+                            continue
+
+                        # 市價做空進場
+                        self.sell(data=data, size=size)
+                        self._entered_today[data] = bar_date
+
+                        # 掛出止盈 (Limit) 和止損 (Stop)
+                        tp_p = round(price * (1 - self.params.tp_pct / 100.0), 4)
+                        sl_p = round(price * (1 + self.params.sl_pct / 100.0), 4)
+
+                        if self.params.tp_pct > 0:
+                            self._pending_tp[data] = self.buy(
+                                data=data, size=size,
+                                exectype=bt.Order.Limit, price=tp_p)
+
+                        if self.params.sl_pct > 0:
+                            self._pending_sl[data] = self.buy(
+                                data=data, size=size,
+                                exectype=bt.Order.Stop, price=sl_p)
+            else:
+                # 收盤前強制平倉 (15:55)
+                if bar_time >= datetime.time(15, 55):
+                    self._cancel_exit_orders(data)
+                    self.close(data=data)
+
+    def notify_order(self, order):
+        """OCO：其中一張成交就取消另一張"""
+        if order.status == order.Completed:
+            data = order.data
+            if order == self._pending_tp.pop(data, None):
+                sl = self._pending_sl.pop(data, None)
+                if sl:
+                    self.cancel(sl)
+            elif order == self._pending_sl.pop(data, None):
+                tp = self._pending_tp.pop(data, None)
+                if tp:
+                    self.cancel(tp)
+
+
+def run_backtrader_5min(dfs: dict, params_dict: dict):
+    """
+    5min 線大腦引擎入口。
+    dfs: {標的名稱: DataFrame(OHLCV, datetime index)}，只含「進場日 T+1」的分鐘線
+    """
+    cerebro = bt.Cerebro()
+
+    for name, df in dfs.items():
+        if df is None or df.empty:
+            continue
+        df_copy = df.copy()
+        if not isinstance(df_copy.index, pd.DatetimeIndex):
+            try:
+                df_copy.index = pd.to_datetime(df_copy.index)
+            except Exception:
+                continue
+
+        mapping = {c: c.lower() for c in df_copy.columns}
+        df_copy = df_copy.rename(columns=mapping)
+        if not all(c in df_copy.columns for c in ['open', 'high', 'low', 'close', 'volume']):
+            continue
+
+        datafeed = bt.feeds.PandasData(dataname=df_copy, name=name, openinterest=-1)
+        cerebro.adddata(datafeed)
+
+    if not cerebro.datas:
+        raise ValueError("沒有有效的 5min 歷史數據！請確認 API 金鑰與日期範圍。")
+
+    cerebro.addstrategy(
+        MomentumShort5minStrategy,
+        stake_mode=params_dict.get('stake_mode', 'shares'),
+        stake_val=float(params_dict.get('stake_val', 100.0)),
+        tp_pct=float(params_dict.get('tp_pct', 15.0)),
+        sl_pct=float(params_dict.get('sl_pct', 5.0)),
+    )
+
+    cerebro.broker.setcash(params_dict.get('starting_cash', 100000))
+    if params_dict.get('is_fixed_comm', False):
+        comminfo = FixedCommInfo(commission=params_dict.get('commission_val', 5.0))
+        cerebro.broker.addcommissioninfo(comminfo)
+    else:
+        cerebro.broker.setcommission(commission=params_dict.get('commission_val', 0.001))
+
+    cerebro.addanalyzer(bt.analyzers.TimeReturn, _name='time_return')
+    cerebro.addanalyzer(bt.analyzers.DrawDown, _name='drawdown')
+    cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name='sharpe',
+                        timeframe=bt.TimeFrame.Days, compression=1, factor=252, riskfreerate=0.0)
+
+    results = cerebro.run()
+    strat = results[0]
+
+    final_value = cerebro.broker.getvalue()
+    time_return = strat.analyzers.time_return.get_analysis()
+    drawdown_info = strat.analyzers.drawdown.get_analysis()
+    sharpe = strat.analyzers.sharpe.get_analysis().get('sharperatio', 0.0) or 0.0
+
+    equity_df = pd.DataFrame(list(time_return.items()), columns=['Date', 'Daily_Return'])
+    equity_df.set_index('Date', inplace=True)
+    equity_df['Cumulative_Return'] = (1 + equity_df['Daily_Return']).cumprod() - 1
+
+    logs_df = pd.DataFrame(strat.trade_logs)
+    if not logs_df.empty:
+        logs_df = logs_df.sort_values(by='出場時間').reset_index(drop=True)
+        total_trades = len(logs_df)
+        win_rate = len(logs_df[logs_df['淨獲利(USD)'] > 0]) / total_trades * 100
+    else:
+        total_trades, win_rate = 0, 0.0
+
+    metrics = {
+        'final_value': final_value,
+        'total_return_pct': (final_value / params_dict.get('starting_cash', 100000) - 1) * 100,
+        'mdd_pct': drawdown_info.max.drawdown if 'max' in drawdown_info else 0.0,
+        'total_trades': total_trades,
+        'win_rate': win_rate,
+        'sharpe': sharpe,
+    }
+    return metrics, equity_df, logs_df

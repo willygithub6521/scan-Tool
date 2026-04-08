@@ -810,7 +810,11 @@ with tab7:
             is_fixed_comm = True
             
         st.markdown("#### 3. 策略與部位 (Strategy & Position)")
-        bt_strategy_choice = st.selectbox("選擇核心大腦要搭載的策略邏輯", ["A. 雙均線波段做多 (含動態止盈止損)", "B. 極端暴漲當沖放空 (嚴格隔日收盤回補)"])
+        bt_strategy_choice = st.selectbox("選擇核心大腦要搭載的策略邏輯", [
+            "A. 雙均線波段做多 (含動態止盈止損)",
+            "B. 極端暴漲當沖放空 (嚴格隔日收盤回補)",
+            "C. 暴漲隔日 5min 限價放空 (Precision 5min Backtest)"
+        ])
         
         stake_mode_radio = st.radio("進場資金規模配置", ["固定每次買賣股數 (Shares)", "固定每次進場運用資金 ($USD)"], horizontal=True)
         if "固定每次進場運用資金" in stake_mode_radio:
@@ -838,7 +842,7 @@ with tab7:
                 "tp_pct": tp_pct,
                 "sl_pct": sl_pct
             }
-        else:
+        elif "B." in bt_strategy_choice:
             cond1 = c_p1.number_input("前日單日總漲幅大於 (%)", value=90.0, step=10.0)
             cond2 = c_p2.number_input("前日開去收實體漲幅大於 (%)", value=70.0, step=10.0)
             
@@ -858,6 +862,23 @@ with tab7:
                 "sl_pct": sl_pct,
                 "max_hold": max_hold
             }
+        elif "C." in bt_strategy_choice:
+            st.info("💡 **5min 精確撮合**：先用日線自動找出暴漲觸發日，再批量下載 T+1 的 5min 線進行現實限價撮合。只需 FMP Starter Plan。")
+            c_sp1, c_sp2 = st.columns(2)
+            c_cond1 = c_sp1.number_input("暴漲條件 1: 前日總漲幅大於 (%)", value=90.0, step=10.0, key="c_cond1")
+            c_cond2 = c_sp2.number_input("暴漲條件 2: 前日實體漲幅大於 (%)", value=70.0, step=10.0, key="c_cond2")
+            c_tp1, c_tp2 = st.columns(2)
+            c_tp = c_tp1.number_input("止盈 (%) - 0 為不設", value=15.0, step=1.0, min_value=0.0, key="c_tp")
+            c_sl = c_tp2.number_input("止損 (%) - 0 為不設", value=5.0, step=1.0, min_value=0.0, key="c_sl")
+            algo_params = {
+                "strategy": "5min_short",
+                "cond1_pct": c_cond1,
+                "cond2_pct": c_cond2,
+                "stake_mode": stake_mode,
+                "stake_val": stake_val,
+                "tp_pct": c_tp,
+                "sl_pct": c_sl,
+            }
         
     st.markdown("---")
     
@@ -870,7 +891,6 @@ with tab7:
                     import backtrader_engine
                     import importlib
                     importlib.reload(backtrader_engine)
-                    from backtrader_engine import run_backtrader
                     
                     params_dict = {
                         "starting_cash": start_cash,
@@ -878,7 +898,68 @@ with tab7:
                         "is_fixed_comm": is_fixed_comm,
                         **algo_params
                     }
-                    metrics, equity_df, trade_logs_df = run_backtrader(target_dfs, params_dict)
+                    
+                    # ===== C 策略：5min 線精確回測 =====
+                    if algo_params.get('strategy') == '5min_short':
+                        if data_source != "FMP" or not fmp_api_key:
+                            st.error("策略 C 需要 FMP API Key 才能下載分鐘線資料！")
+                            st.stop()
+                            
+                        from backtrader_engine import run_backtrader_5min
+                        from data_fetcher import get_intraday_data
+                        
+                        # Step 1: 自動找出所有暴漲觸發日
+                        trigger_events = []  # list of (ticker, trigger_date T, entry_date T+1)
+                        for t_name, tgt_df in target_dfs.items():
+                            if tgt_df is None or len(tgt_df) < 3:
+                                continue
+                            tmp = tgt_df.copy()
+                            tmp['_prev_close'] = tmp['Close'].shift(1)
+                            tmp['_prev_prev_close'] = tmp['Close'].shift(2)
+                            tmp['_prev_open'] = tmp['Open'].shift(1)
+                            tmp['_ret'] = (tmp['_prev_close'] / tmp['_prev_prev_close'] - 1) * 100
+                            tmp['_body'] = (tmp['_prev_close'] / tmp['_prev_open'] - 1) * 100
+                            # 跳空防空：進場日開盤不高於暴漲日收盤
+                            tmp['_gap_ok'] = tmp['Open'] <= tmp['_prev_close']
+                            hits = tmp[
+                                (tmp['_ret'] >= algo_params['cond1_pct']) &
+                                (tmp['_body'] >= algo_params['cond2_pct']) &
+                                tmp['_gap_ok']
+                            ]
+                            for entry_date, _ in hits.iterrows():
+                                trigger_events.append((t_name, entry_date))
+                        
+                        if not trigger_events:
+                            st.warning("在現有資料內找不到任何符合條件的暴漲觸發日。請確認標的的日線已存入上方資料庫（組合回測需先連線）。")
+                            st.stop()
+                        
+                        with st.expander(f"➡️ 找到 {len(trigger_events)} 個暴漲進場事件 (點我展開確認)", expanded=False):
+                            ev_df = pd.DataFrame(trigger_events, columns=['標的', '進場日 (T+1)'])
+                            st.dataframe(ev_df)
+
+                        
+                        # Step 2: 批量下載 T+1 的 5min 線
+                        st.info(f"📡 正在下載 {len(trigger_events)} 個事件日的 5min 線資料...")
+                        dfs_5min = {}
+                        my_prog = st.progress(0)
+                        for idx, (t_name, entry_date) in enumerate(trigger_events):
+                            from_str = entry_date.strftime('%Y-%m-%d')
+                            to_str = entry_date.strftime('%Y-%m-%d')
+                            key = f"{t_name}_{from_str}"
+                            df_5m = get_intraday_data(t_name, "5min", from_str, to_str, fmp_api_key)
+                            if df_5m is not None and not df_5m.empty:
+                                dfs_5min[key] = df_5m
+                            my_prog.progress((idx + 1) / len(trigger_events))
+                        my_prog.empty()
+                        
+                        if not dfs_5min:
+                            st.error("所有分鐘線資料下載失敗。請確認 FMP API Key 與 Starter Plan 權限。")
+                            st.stop()
+                        
+                        metrics, equity_df, trade_logs_df = run_backtrader_5min(dfs_5min, params_dict)
+                    else:
+                        from backtrader_engine import run_backtrader
+                        metrics, equity_df, trade_logs_df = run_backtrader(target_dfs, params_dict)
                     
                     st.success(f"✅ 回測完畢！總計完成 {metrics['total_trades']} 趟完整交易 (買+賣)。")
                     

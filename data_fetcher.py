@@ -102,6 +102,36 @@ class FMPProvider(DataProvider):
             pass
         return {}
 
+    def fetch_intraday_data(self, ticker: str, interval: str = "5min", from_date: str = "", to_date: str = "") -> pd.DataFrame:
+        """取得 FMP 分鐘線歷史資料 (Starter Plan 支援 5min / 15min)"""
+        url = f"{self.base_url}/historical-chart/{interval}?symbol={ticker}&apikey={self.api_key}"
+        if from_date:
+            url += f"&from={from_date}"
+        if to_date:
+            url += f"&to={to_date}"
+        try:
+            response = requests.get(url)
+            data = response.json()
+            
+            if not isinstance(data, list) or len(data) == 0:
+                return pd.DataFrame()
+            
+            df = pd.DataFrame(data)
+            df['date'] = pd.to_datetime(df['date'])
+            df.set_index('date', inplace=True)
+            df.sort_index(ascending=True, inplace=True)
+            
+            df.rename(columns={
+                'open': 'Open', 'high': 'High',
+                'low': 'Low', 'close': 'Close', 'volume': 'Volume'
+            }, inplace=True)
+            
+            keep_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume'] if c in df.columns]
+            return df[keep_cols]
+        except Exception as e:
+            st.error(f"Error fetching intraday data from FMP for {ticker}: {e}")
+            return pd.DataFrame()
+
     def fetch_news(self, ticker: str, limit: int = 3) -> list:
         url = f"https://financialmodelingprep.com/stable/news/stock?symbols={ticker}&apikey={self.api_key}"
         try:
@@ -192,3 +222,8 @@ def get_stock_news(ticker: str, provider_name: str, api_key: str = "", limit: in
     if provider_name == "FMP":
         return FMPProvider(api_key).fetch_news(ticker, limit)
     return []
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_intraday_data(ticker: str, interval: str, from_date: str, to_date: str, api_key: str = "") -> pd.DataFrame:
+    """取得 FMP 分鐘線資料快取版 (TTL=10min)，僅支援 FMP Starter Plan 以上"""
+    return FMPProvider(api_key).fetch_intraday_data(ticker, interval, from_date, to_date)
