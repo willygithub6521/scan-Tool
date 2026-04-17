@@ -137,11 +137,13 @@ if start_scan:
     if input_method == "FMP 伺服器端進階篩選":
         with st.spinner("📡 正在向 FMP 請求符合條件的標的..."):
             screener_results = get_fmp_screener_tickers(fmp_api_key, st.session_state.get("fmp_server_params", {}))
-            tickers = [item["symbol"] for item in screener_results if "symbol" in item]
+            tickers = []
             for item in screener_results:
                 if "symbol" in item:
-                    st.session_state["ticker_info_cache"][item["symbol"]] = {
-                        "shortName": item.get("companyName", item["symbol"]),
+                    sym = item["symbol"]
+                    tickers.append(sym)
+                    st.session_state["ticker_info_cache"][sym] = {
+                        "shortName": item.get("companyName", sym),
                         "sector": item.get("sector", "N/A")
                     }
         if not tickers:
@@ -250,6 +252,8 @@ if start_scan:
                     table_placeholder.dataframe(df_live, use_container_width=True)
                     
     # 將完成結果存入 session_state，讓換頁或排序時不需要重跑
+    # scan_results: table data
+    # raw_data_dict: k-line raw data
     st.session_state["scan_results"] = temp_results
     st.session_state["raw_data_dict"] = temp_raw
     my_bar.empty()
@@ -262,6 +266,7 @@ if not results:
     st.warning("請設定篩選條件後，點擊左側最下方「開始統一搜尋」按鈕。若已搜尋，可能是未發現符合條件的股票。")
     st.stop()
 
+#Pandas DataFrame
 results_df = pd.DataFrame(results)
 
 # 實踐「嚴格過濾」機制：即時更新 Table！
@@ -313,6 +318,7 @@ if not results_df.empty and raw_data_dict:
             rvol_list.append(0.0)
             pass_hist_list.append("❌")
             
+    #Pandas DataFrame always add column
     results_df["1日漲幅(%)"] = ret_1d_list
     results_df[f"{n_days_return}日漲幅(%)"] = ret_nd_list
     results_df["1日漲幅達標"] = pass_1d_list
@@ -325,6 +331,7 @@ if not results_df.empty and raw_data_dict:
     results_df["_PassStrictHist"] = [ v == "✅" for v in pass_hist_list ]
 
 if strict_return_filter and not results_df.empty:
+    # Pandas boolean indexing
     results_df = results_df[results_df["_PassStrict"]]
     if results_df.empty:
         st.warning(f"啟用嚴格過濾後，目前 {len(results)} 檔掃描完成的股票中，沒有任何一檔符合條件。")
@@ -368,7 +375,7 @@ with tab1:
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             st.session_state["saved_history"][now_str] = results_df.copy()
             st.success(f"已成功將 {len(results_df)} 檔潛在股儲存至「歷史庫存」標籤頁！")
-            
+    #Display a dynamic Pandas DataFrame in Streamlit.      
     st.dataframe(results_df, use_container_width=True)
 
 with tab2:
