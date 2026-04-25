@@ -104,7 +104,7 @@ class FMPProvider(DataProvider):
 
     def fetch_intraday_data(self, ticker: str, interval: str = "5min", from_date: str = "", to_date: str = "") -> pd.DataFrame:
         """取得 FMP 分鐘線歷史資料 (Starter Plan 支援 5min / 15min)"""
-        url = f"{self.base_url}/historical-chart/{interval}?symbol={ticker}&apikey={self.api_key}"
+        url = f"{self.base_url}/historical-chart/{interval}?symbol={ticker}&apikey={self.api_key}&extended=true"
         if from_date:
             url += f"&from={from_date}"
         if to_date:

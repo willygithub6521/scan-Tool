@@ -420,17 +420,77 @@ class MomentumShort5minStrategy(Logging5minStrategy):
     def __init__(self):
         super().__init__()
         self._entered_today = {}
+        self._pending_entry = {}
         self._pending_tp = {}
         self._pending_sl = {}
+        self._trigger_dates = {}
+        self._tpo_data = {}
+        self._poc_vah = {}
 
     def _cancel_exit_orders(self, data):
-        for order_dict in [self._pending_tp, self._pending_sl]:
+        for order_dict in [self._pending_entry, self._pending_tp, self._pending_sl]:
             o = order_dict.pop(data, None)
             if o and o.status in [o.Created, o.Submitted, o.Accepted, o.Partial]:
                 self.cancel(o)
 
+    def _calculate_tpo(self, tpo_dict):
+        if not tpo_dict: return 0, 0
+        total_tpo = sum(tpo_dict.values())
+        poc = max(tpo_dict, key=tpo_dict.get)
+        target_va = total_tpo * 0.70
+        
+        current_tpo = tpo_dict[poc]
+        va_high = poc
+        va_low = poc
+        
+        prices = sorted(list(tpo_dict.keys()))
+        if not prices: return 0, 0
+        
+        poc_idx = prices.index(poc)
+        up_idx = poc_idx + 1
+        down_idx = poc_idx - 1
+        
+        while current_tpo < target_va:
+            up_tpo = 0
+            if up_idx < len(prices):
+                up_tpo += tpo_dict[prices[up_idx]]
+            if up_idx + 1 < len(prices):
+                up_tpo += tpo_dict[prices[up_idx+1]]
+                
+            down_tpo = 0
+            if down_idx >= 0:
+                down_tpo += tpo_dict[prices[down_idx]]
+            if down_idx - 1 >= 0:
+                down_tpo += tpo_dict[prices[down_idx-1]]
+                
+            if up_tpo == 0 and down_tpo == 0:
+                break
+                
+            if up_tpo >= down_tpo:
+                if up_idx < len(prices):
+                    current_tpo += tpo_dict[prices[up_idx]]
+                    va_high = max(va_high, prices[up_idx])
+                    up_idx += 1
+                if up_idx < len(prices):
+                    current_tpo += tpo_dict[prices[up_idx]]
+                    va_high = max(va_high, prices[up_idx])
+                    up_idx += 1
+            else:
+                if down_idx >= 0:
+                    current_tpo += tpo_dict[prices[down_idx]]
+                    va_low = min(va_low, prices[down_idx])
+                    down_idx -= 1
+                if down_idx >= 0:
+                    current_tpo += tpo_dict[prices[down_idx]]
+                    va_low = min(va_low, prices[down_idx])
+                    down_idx -= 1
+                    
+        print(f"POC: {poc}, VAH: {va_high}")
+        return poc, va_high
+
     def next(self):
         import datetime
+        import math
         for data in self.datas:
             if len(data) == 0:
                 continue
@@ -439,59 +499,93 @@ class MomentumShort5minStrategy(Logging5minStrategy):
             bar_time = data.datetime.time(0)
             bar_date = data.datetime.date(0)
 
-            if not pos:
-                # 只要時間 >= 09:30 且今日還沒進場過，就執行一次 (可覆蓋到第一根 K 是 9:35 的股票)
-                if bar_time >= datetime.time(9, 30):
-                    if self._entered_today.get(data) != bar_date:
-                        price = data.close[0]
-                        if price <= 0:
-                            continue
+            if data not in self._trigger_dates:
+                self._trigger_dates[data] = bar_date
+                self._tpo_data[data] = {}
 
-                        if self.params.stake_mode == 'cash':
-                            size = int(self.params.stake_val // price)
-                        else:
-                            size = int(self.params.stake_val)
+            trigger_date = self._trigger_dates[data]
 
-                        max_size = int(self.broker.getvalue() // price)
-                        size = min(size, max_size)
-                        if size <= 0:
-                            continue
+            # 1. 暴漲日 (T) 負責計算 TPO Profile
+            if bar_date == trigger_date:
+                bin_step = max(data.close[0] * 0.0025, 0.01)
+                low_bin = math.floor(data.low[0] / bin_step) * bin_step
+                high_bin = math.ceil(data.high[0] / bin_step) * bin_step
+                steps = int((high_bin - low_bin) / bin_step) + 1
+                if steps < 1000:
+                    for i in range(steps):
+                        p = low_bin + (i * bin_step)
+                        self._tpo_data[data][p] = self._tpo_data[data].get(p, 0) + 1
+                print(f"{data._name}: {self._tpo_data}")
+            # 2. 進場日 (T+1) 執行策略邏輯
+            elif bar_date > trigger_date:
+                if not pos:
+                    # 時間來到 07:00 (台灣時間 19:00 前後，開盤前兩個半小時)
+                    if bar_time >= datetime.time(7, 0):
+                        if self._entered_today.get(data) != bar_date:
+                            # 結算 POC 與 VAH
+                            if data not in self._poc_vah:
+                                poc, vah = self._calculate_tpo(self._tpo_data.get(data, {}))
+                                self._poc_vah[data] = (poc, vah)
+                            else:
+                                poc, vah = self._poc_vah[data]
 
-                        # 市價做空進場
-                        self.sell(data=data, size=size)
-                        self._entered_today[data] = bar_date
+                            price = data.close[0]
+                            prev_close = data.openinterest[0] if data.openinterest[0] > 0 else price
+                            
+                            # 當日跌幅必須介於 0% 到 -15% 之間才操作
+                            curr_drop = (price / prev_close - 1) * 100
+                            if -15.0 <= curr_drop <= 0.0 and poc > 0:
+                                # 限價空單價格 = (POC + VAH) / 2
+                                entry_price = round((poc + vah) / 2.0, 4) if vah > 0 else poc
+                                
+                                if self.params.stake_mode == 'cash':
+                                    size = int(self.params.stake_val // entry_price)
+                                else:
+                                    size = int(self.params.stake_val)
 
-                        # 掛出止盈 (Limit) 和止損 (Stop)
-                        tp_p = round(price * (1 - self.params.tp_pct / 100.0), 4)
-                        sl_p = round(price * (1 + self.params.sl_pct / 100.0), 4)
+                                max_size = int(self.broker.getvalue() // entry_price)
+                                size = min(size, max_size)
+                                if size <= 0:
+                                    continue
 
-                        if self.params.tp_pct > 0:
-                            self._pending_tp[data] = self.buy(
-                                data=data, size=size,
-                                exectype=bt.Order.Limit, price=tp_p)
-
-                        if self.params.sl_pct > 0:
-                            self._pending_sl[data] = self.buy(
-                                data=data, size=size,
-                                exectype=bt.Order.Stop, price=sl_p)
-            else:
-                # 收盤前強制平倉 (15:55)
-                if bar_time >= datetime.time(15, 55):
-                    self._cancel_exit_orders(data)
-                    self.close(data=data)
+                                # 提交限價單 (Limit order)
+                                o = self.sell(data=data, size=size, exectype=bt.Order.Limit, price=entry_price)
+                                self._pending_entry[data] = o
+                                self._entered_today[data] = bar_date
+                else:
+                    # 收盤前強制平倉 (15:55)
+                    if bar_time >= datetime.time(15, 55):
+                        self._cancel_exit_orders(data)
+                        self.close(data=data)
 
     def notify_order(self, order):
-        """OCO：其中一張成交就取消另一張"""
+        data = order.data
         if order.status == order.Completed:
-            data = order.data
-            if order == self._pending_tp.pop(data, None):
-                sl = self._pending_sl.pop(data, None)
-                if sl:
-                    self.cancel(sl)
-            elif order == self._pending_sl.pop(data, None):
-                tp = self._pending_tp.pop(data, None)
-                if tp:
-                    self.cancel(tp)
+            if order == self._pending_entry.get(data):
+                self._pending_entry.pop(data, None)
+                price = order.executed.price
+                size = abs(order.executed.size)
+                
+                tp_p = round(price * (1 - self.params.tp_pct / 100.0), 4)
+                sl_p = round(price * (1 + self.params.sl_pct / 100.0), 4)
+
+                if self.params.tp_pct > 0:
+                    self._pending_tp[data] = self.buy(data=data, size=size, exectype=bt.Order.Limit, price=tp_p)
+                if self.params.sl_pct > 0:
+                    self._pending_sl[data] = self.buy(data=data, size=size, exectype=bt.Order.Stop, price=sl_p)
+                    
+            elif order == self._pending_tp.get(data) or order == self._pending_sl.get(data):
+                """OCO：其中一張成交就取消另一張"""
+                if order == self._pending_tp.pop(data, None):
+                    sl = self._pending_sl.pop(data, None)
+                    if sl: self.cancel(sl)
+                elif order == self._pending_sl.pop(data, None):
+                    tp = self._pending_tp.pop(data, None)
+                    if tp: self.cancel(tp)
+        elif order.status in [order.Canceled, order.Margin, order.Rejected]:
+            if order == self._pending_entry.get(data): self._pending_entry.pop(data, None)
+            elif order == self._pending_tp.get(data): self._pending_tp.pop(data, None)
+            elif order == self._pending_sl.get(data): self._pending_sl.pop(data, None)
 
 
 def run_backtrader_5min(dfs: dict, params_dict: dict):
@@ -516,7 +610,12 @@ def run_backtrader_5min(dfs: dict, params_dict: dict):
         if not all(c in df_copy.columns for c in ['open', 'high', 'low', 'close', 'volume']):
             continue
 
-        datafeed = bt.feeds.PandasData(dataname=df_copy, name=name, openinterest=-1)
+        if "prev_close" in df_copy.columns:
+            df_copy['openinterest'] = df_copy['prev_close']
+        else:
+            df_copy['openinterest'] = 0.0
+
+        datafeed = bt.feeds.PandasData(dataname=df_copy, name=name, openinterest='openinterest')
         cerebro.adddata(datafeed)
 
     if not cerebro.datas:

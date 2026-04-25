@@ -915,46 +915,60 @@ with tab7:
                         from backtrader_engine import run_backtrader_5min
                         from data_fetcher import get_intraday_data
                         
-                        # Step 1: 自動找出所有暴漲觸發日
-                        trigger_events = []  # list of (ticker, trigger_date T, entry_date T+1)
+                        # Step 1: 自動找出所有暴漲觸發日與 RVOL 計算
+                        trigger_events = []
                         for t_name, tgt_df in target_dfs.items():
-                            if tgt_df is None or len(tgt_df) < 3:
+                            if tgt_df is None or len(tgt_df) < 21:
                                 continue
                             tmp = tgt_df.copy()
                             tmp['_prev_close'] = tmp['Close'].shift(1)
                             tmp['_prev_prev_close'] = tmp['Close'].shift(2)
                             tmp['_prev_open'] = tmp['Open'].shift(1)
+                            tmp['_vol_T'] = tmp['Volume'].shift(1)
+                            tmp['_vol_ma20'] = tmp['Volume'].shift(1).rolling(20).mean()
+                            tmp['_rvol'] = tmp['_vol_T'] / tmp['_vol_ma20']
+
                             tmp['_ret'] = (tmp['_prev_close'] / tmp['_prev_prev_close'] - 1) * 100
                             tmp['_body'] = (tmp['_prev_close'] / tmp['_prev_open'] - 1) * 100
                             # 跳空防空：進場日開盤不高於暴漲日收盤
                             tmp['_gap_ok'] = tmp['Open'] <= tmp['_prev_close']
+                            
                             hits = tmp[
                                 (tmp['_ret'] >= algo_params['cond1_pct']) &
                                 (tmp['_body'] >= algo_params['cond2_pct']) &
+                                (tmp['_rvol'] >= 10.0) &
                                 tmp['_gap_ok']
                             ]
-                            for entry_date, _ in hits.iterrows():
-                                trigger_events.append((t_name, entry_date))
+                            
+                            for entry_date, row in hits.iterrows():
+                                # 找出 trigger_date (T日) 的日期
+                                trigger_dates = tmp.index[tmp.index < entry_date]
+                                if len(trigger_dates) > 0:
+                                    trigger_date = trigger_dates[-1]
+                                    trigger_events.append((t_name, trigger_date, entry_date, row['_prev_close']))
                         
                         if not trigger_events:
-                            st.warning("在現有資料內找不到任何符合條件的暴漲觸發日。請確認標的的日線已存入上方資料庫（組合回測需先連線）。")
+                            st.warning("在現有資料內找不到任何符合條件的暴漲觸發日 (可能因 RVOL 未滿 10)。")
                             st.stop()
                         
                         with st.expander(f"➡️ 找到 {len(trigger_events)} 個暴漲進場事件 (點我展開確認)", expanded=False):
-                            ev_df = pd.DataFrame(trigger_events, columns=['標的', '進場日 (T+1)'])
+                            ev_df = pd.DataFrame(trigger_events, columns=['標的', '暴漲日 (T)', '進場日 (T+1)', '昨收(PrevClose)'])
                             st.dataframe(ev_df)
-
                         
-                        # Step 2: 批量下載 T+1 的 5min 線
-                        st.info(f"📡 正在下載 {len(trigger_events)} 個事件日的 5min 線資料...")
+                        # Step 2: 批量下載 T 與 T+1 的 5min 線，並注入 prev_close
+                        st.info(f"📡 正在下載 {len(trigger_events)} 個事件日的 5min 線資料 (含 T 日以計算 TPO)...")
                         dfs_5min = {}
                         my_prog = st.progress(0)
-                        for idx, (t_name, entry_date) in enumerate(trigger_events):
-                            from_str = entry_date.strftime('%Y-%m-%d')
+                        for idx, ev in enumerate(trigger_events):
+                            t_name, trigger_date, entry_date, prev_close = ev
+                            from_str = trigger_date.strftime('%Y-%m-%d')
                             to_str = entry_date.strftime('%Y-%m-%d')
-                            key = f"{t_name}_{from_str}"
+                            key = f"{t_name}_{to_str}"
                             df_5m = get_intraday_data(t_name, "5min", from_str, to_str, fmp_api_key)
+                            
                             if df_5m is not None and not df_5m.empty:
+                                # 注入 prev_close 供 backtrader 讀取 (透過 openinterest 映射)
+                                df_5m['prev_close'] = prev_close
                                 dfs_5min[key] = df_5m
                             my_prog.progress((idx + 1) / len(trigger_events))
                         my_prog.empty()
