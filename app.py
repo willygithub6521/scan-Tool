@@ -102,10 +102,20 @@ with st.sidebar.expander("動能漲幅與爆量篩選 (Client-Side)", expanded=T
     strict_return_filter = st.checkbox("啟用嚴格過濾 (只顯示漲勢達標)", value=False)
     
     st.markdown("---")
-    st.markdown("**歷史極端暴漲紀錄過濾**")
-    history_cond1 = st.number_input("曾經單日總漲幅大於 (%)", value=90.0, step=10.0)
-    history_cond2 = st.number_input("曾經單日實體(開到收)大於 (%)", value=70.0, step=10.0)
-    strict_history_filter = st.checkbox("啟用歷史暴漲過濾 (獨立篩選)", value=False)
+    st.markdown("**歷史記錄篩選**")
+    strategy_select = st.selectbox("策略選擇", ["1.Extended Short", "2.Fake Breakout Short"], index=0)
+    
+    hist_cfg = {}
+    if strategy_select == "1.Extended Short":
+        hist_cfg['min_daily_ret'] = st.number_input("曾經單日總漲幅大於 (%)", value=90.0, step=10.0)
+        hist_cfg['min_body_ret'] = st.number_input("曾經單日實體(開到收)大於 (%)", value=70.0, step=10.0)
+        strict_history_filter = st.checkbox("啟用歷史暴漲過濾 (獨立篩選)", value=False)
+    elif strategy_select == "2.Fake Breakout Short":
+        hist_cfg['min_gap'] = st.number_input("gap up漲幅大於 (%)", value=30.0, step=5.0)
+        hist_cfg['min_vol_m'] = st.number_input("Volume大於 (M)", value=10.0, step=5.0)
+        hist_cfg['min_prev_close'] = st.number_input("前一日收盤價大於 ($)", value=1.0, step=1.0)
+        hist_cfg['min_shadow_ratio'] = st.number_input("上影線比例大於 (%)", value=60.0, step=5.0)
+        strict_history_filter = st.checkbox("啟用歷史假突破過濾 (獨立篩選)", value=False)
     
     st.markdown("---")
     vol_multiplier = st.number_input("RVOL 異常倍數 (今量 vs 20日均量)", value=10.0, step=1.0)
@@ -294,9 +304,27 @@ if not results_df.empty and raw_data_dict:
             is_strict = (cond_1d or cond_nd) if "OR" in match_logic else (cond_1d and cond_nd)
             
             if len(df) >= 2:
-                daily_ret = (df['Close'] / df['Close'].shift(1) - 1) * 100
-                open_close_ret = (df['Close'] / df['Open'] - 1) * 100
-                hist_match = ((daily_ret >= history_cond1) & (open_close_ret >= history_cond2)).any()
+                if strategy_select == "1.Extended Short":
+                    daily_ret = (df['Close'] / df['Close'].shift(1) - 1) * 100
+                    open_close_ret = (df['Close'] / df['Open'] - 1) * 100
+                    hist_match = ((daily_ret >= hist_cfg['min_daily_ret']) & 
+                                  (open_close_ret >= hist_cfg['min_body_ret'])).any()
+                elif strategy_select == "2.Fake Breakout Short":
+                    # 計算 Fake Breakout 邏輯
+                    gap_up = (df['Open'] / df['Close'].shift(1) - 1) * 100
+                    vol_m = df['Volume'] / 1e6
+                    prev_close = df['Close'].shift(1)
+                    # 上影線比例: (High - max(Open, Close)) / (High - Low)
+                    range_size = (df['High'] - df['Low'])
+                    upper_shadow = (df['High'] - df[['Open', 'Close']].max(axis=1))
+                    shadow_ratio = (upper_shadow / range_size * 100).fillna(0)
+                    
+                    hist_match = ((gap_up >= hist_cfg['min_gap']) & 
+                                  (vol_m >= hist_cfg['min_vol_m']) & 
+                                  (prev_close >= hist_cfg['min_prev_close']) & 
+                                  (shadow_ratio >= hist_cfg['min_shadow_ratio'])).any()
+                else:
+                    hist_match = False
             else:
                 hist_match = False
 
@@ -323,7 +351,9 @@ if not results_df.empty and raw_data_dict:
     results_df[f"{n_days_return}日漲幅(%)"] = ret_nd_list
     results_df["1日漲幅達標"] = pass_1d_list
     results_df[f"{n_days_return}日漲幅達標"] = pass_nd_list
-    results_df["歷史暴漲達標"] = pass_hist_list
+    # 根據策略決定欄位名稱
+    hist_col_name = "歷史暴漲達標" if strategy_select == "1.Extended Short" else "歷史假突破達標"
+    results_df[hist_col_name] = pass_hist_list
     results_df["RVOL (倍)"] = rvol_list
     results_df["爆量達標"] = pass_vol_list
     results_df["_PassStrict"] = pass_strict_list
