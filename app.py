@@ -103,7 +103,7 @@ with st.sidebar.expander("動能漲幅與爆量篩選 (Client-Side)", expanded=T
     
     st.markdown("---")
     st.markdown("**歷史記錄篩選**")
-    strategy_select = st.selectbox("策略選擇", ["1.Extended Short", "2.Fake Breakout Short"], index=0)
+    strategy_select = st.selectbox("策略選擇", ["1.Extended Short", "2.Fake Breakout Short", "3.QullaMaggie Breakout"], index=0)
     
     hist_cfg = {}
     if strategy_select == "1.Extended Short":
@@ -116,6 +116,10 @@ with st.sidebar.expander("動能漲幅與爆量篩選 (Client-Side)", expanded=T
         hist_cfg['min_prev_close'] = st.number_input("前一日收盤價大於 ($)", value=1.0, step=1.0)
         hist_cfg['min_shadow_ratio'] = st.number_input("上影線比例大於 (%)", value=60.0, step=5.0)
         strict_history_filter = st.checkbox("啟用歷史假突破過濾 (獨立篩選)", value=False)
+    elif strategy_select == "3.QullaMaggie Breakout":
+        hist_cfg['qm_days'] = st.number_input("前 N 日區間 (天)", value=20, min_value=1, step=1)
+        hist_cfg['qm_min_ret'] = st.number_input("期間漲幅大於 (%)", value=30.0, step=5.0)
+        strict_history_filter = st.checkbox("啟用 QullaMaggie 突破過濾 (獨立篩選)", value=False)
     
     st.markdown("---")
     vol_multiplier = st.number_input("RVOL 異常倍數 (今量 vs 20日均量)", value=10.0, step=1.0)
@@ -282,10 +286,11 @@ results_df = pd.DataFrame(results)
 # 實踐「嚴格過濾」機制：即時更新 Table！
 # 解耦：當使用者在側邊欄調整 N 日、或漲幅下限時，直接重新計算並覆寫 dataframe
 if not results_df.empty and raw_data_dict:
-    cols_to_drop = [c for c in results_df.columns if "漲幅" in c or "_PassStrict" in c or "爆量" in c or "RVOL" in c or "歷史暴漲" in c]
+    cols_to_drop = [c for c in results_df.columns if "漲幅" in c or "_PassStrict" in c or "爆量" in c or "RVOL" in c or "歷史暴漲" in c or "歷史假突破" in c or "QullaMaggie" in c]
     results_df = results_df.drop(columns=cols_to_drop, errors='ignore')
     
     ret_1d_list, ret_nd_list, pass_1d_list, pass_nd_list, pass_strict_list, pass_vol_list, rvol_list, pass_hist_list = [], [], [], [], [], [], [], []
+    qm_recent_ret_list = []
     
     for _, row in results_df.iterrows():
         ticker = row["Ticker"]
@@ -303,6 +308,7 @@ if not results_df.empty and raw_data_dict:
             cond_1d, cond_nd = r1 >= min_1d_return, rn >= min_nd_return
             is_strict = (cond_1d or cond_nd) if "OR" in match_logic else (cond_1d and cond_nd)
             
+            qm_recent_ret = 0.0
             if len(df) >= 2:
                 if strategy_select == "1.Extended Short":
                     daily_ret = (df['Close'] / df['Close'].shift(1) - 1) * 100
@@ -323,6 +329,15 @@ if not results_df.empty and raw_data_dict:
                                   (vol_m >= hist_cfg['min_vol_m']) & 
                                   (prev_close >= hist_cfg['min_prev_close']) & 
                                   (shadow_ratio >= hist_cfg['min_shadow_ratio'])).any()
+                elif strategy_select == "3.QullaMaggie Breakout":
+                    qm_days = int(hist_cfg['qm_days'])
+                    if len(df) >= qm_days + 1:
+                        rolling_ret = (df['Close'] / df['Close'].shift(qm_days) - 1) * 100
+                        # hist_match = (rolling_ret >= hist_cfg['qm_min_ret']).any() //歷史曾經設定天數內達標過
+                        qm_recent_ret = rolling_ret.iloc[-1]
+                        hist_match = bool(qm_recent_ret >= hist_cfg['qm_min_ret']) if not pd.isna(qm_recent_ret) else False
+                    else:
+                        hist_match = False
                 else:
                     hist_match = False
             else:
@@ -336,6 +351,7 @@ if not results_df.empty and raw_data_dict:
             pass_vol_list.append("✅" if cond_vol else "❌")
             rvol_list.append(round(rvol, 2))
             pass_hist_list.append("✅" if hist_match else "❌")
+            qm_recent_ret_list.append(round(qm_recent_ret, 2) if not pd.isna(qm_recent_ret) else 0.0)
         else:
             ret_1d_list.append(0.0)
             ret_nd_list.append(0.0)
@@ -345,6 +361,7 @@ if not results_df.empty and raw_data_dict:
             pass_vol_list.append("❌")
             rvol_list.append(0.0)
             pass_hist_list.append("❌")
+            qm_recent_ret_list.append(0.0)
             
     #Pandas DataFrame always add column
     results_df["1日漲幅(%)"] = ret_1d_list
@@ -352,7 +369,15 @@ if not results_df.empty and raw_data_dict:
     results_df["1日漲幅達標"] = pass_1d_list
     results_df[f"{n_days_return}日漲幅達標"] = pass_nd_list
     # 根據策略決定欄位名稱
-    hist_col_name = "歷史暴漲達標" if strategy_select == "1.Extended Short" else "歷史假突破達標"
+    if strategy_select == "1.Extended Short":
+        hist_col_name = "歷史暴漲達標"
+    elif strategy_select == "2.Fake Breakout Short":
+        hist_col_name = "歷史假突破達標"
+    else:
+        hist_col_name = "QullaMaggie突破達標"
+        qm_days = int(hist_cfg.get('qm_days', 20))
+        results_df[f"QM_{qm_days}日內近期漲幅(%)"] = qm_recent_ret_list
+        
     results_df[hist_col_name] = pass_hist_list
     results_df["RVOL (倍)"] = rvol_list
     results_df["爆量達標"] = pass_vol_list
@@ -376,7 +401,7 @@ if strict_vol_filter and not results_df.empty:
 if strict_history_filter and not results_df.empty:
     results_df = results_df[results_df["_PassStrictHist"]]
     if results_df.empty:
-        st.warning(f"啟用歷史暴漲過濾後，查無任何曾符合暴漲條件的股票。")
+        st.warning(f"啟用歷史紀錄過濾後，查無任何曾符合條件的股票。")
         st.stop()
 
 # 為了畫面整潔，移除內部追蹤用欄位
