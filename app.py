@@ -110,6 +110,18 @@ with st.sidebar.expander("動能漲幅與爆量篩選 (Client-Side)", expanded=T
     if strategy_select == "1.Extended Short":
         hist_cfg['min_daily_ret'] = st.number_input("曾經單日總漲幅大於 (%)", value=90.0, step=10.0)
         hist_cfg['min_body_ret'] = st.number_input("曾經單日實體(開到收)大於 (%)", value=70.0, step=10.0)
+        
+        period_to_months = {"1mo": 1, "3mo": 3, "6mo": 6, "1y": 12, "2y": 24, "5y": 60, "max": 120}
+        max_months = period_to_months.get(period, 120)
+        hist_cfg['time_range'] = st.slider(
+            "歷史過濾時間範圍 (距今幾個月前)", 
+            min_value=0, 
+            max_value=max_months, 
+            value=(0, max_months), 
+            step=1,
+            help="選擇要尋找暴漲紀錄的時間範圍。例如 (0, 6) 代表最近 6 個月內；(6, 12) 代表半年前到一年前的區間。"
+        )
+        
         strict_history_filter = st.checkbox("啟用歷史暴漲過濾 (獨立篩選)", value=False)
     elif strategy_select == "2.Fake Breakout Short":
         hist_cfg['min_gap'] = st.number_input("gap up漲幅大於 (%)", value=30.0, step=5.0)
@@ -326,6 +338,15 @@ if not results_df.empty and raw_data_dict:
                     daily_ret = (df['Close'] / df['Close'].shift(1) - 1) * 100
                     open_close_ret = (df['Close'] / df['Open'] - 1) * 100
                     valid_mask = (daily_ret >= hist_cfg['min_daily_ret']) & (open_close_ret >= hist_cfg['min_body_ret'])
+                    
+                    if 'time_range' in hist_cfg:
+                        min_m, max_m = hist_cfg['time_range']
+                        latest_date = df.index[-1]
+                        start_date = latest_date - pd.DateOffset(months=max_m)
+                        end_date = latest_date - pd.DateOffset(months=min_m)
+                        time_mask = (df.index >= start_date) & (df.index <= end_date)
+                        valid_mask = valid_mask & time_mask
+                        
                     hist_match = valid_mask.any()
                     if hist_match:
                         latest_date_idx = df[valid_mask].index[-1]
