@@ -128,6 +128,18 @@ with st.sidebar.expander("動能漲幅與爆量篩選 (Client-Side)", expanded=T
         hist_cfg['min_vol_m'] = st.number_input("Volume大於 (M)", value=10.0, step=5.0)
         hist_cfg['min_prev_close'] = st.number_input("前一日收盤價大於 ($)", value=1.0, step=1.0)
         hist_cfg['min_shadow_ratio'] = st.number_input("上影線比例大於 (%)", value=60.0, step=5.0)
+        
+        period_to_months = {"1mo": 1, "3mo": 3, "6mo": 6, "1y": 12, "2y": 24, "5y": 60, "max": 120}
+        max_months = period_to_months.get(period, 120)
+        hist_cfg['time_range'] = st.slider(
+            "歷史過濾時間範圍 (距今幾個月前)", 
+            min_value=0, 
+            max_value=max_months, 
+            value=(0, max_months), 
+            step=1,
+            help="選擇要尋找紀錄的時間範圍。例如 (0, 6) 代表最近 6 個月內；(6, 12) 代表半年前到一年前的區間。"
+        )
+        
         strict_history_filter = st.checkbox("啟用歷史假突破過濾 (獨立篩選)", value=False)
     elif strategy_select == "3.QullaMaggie Breakout":
         hist_cfg['qm_days'] = st.number_input("前 N 日區間 (天)", value=20, min_value=1, step=1)
@@ -282,7 +294,7 @@ if start_scan:
                     if "_PassStrict" in df_live.columns:
                         df_live = df_live.drop(columns=["_PassStrict"])
                         
-                    table_placeholder.dataframe(df_live, use_container_width=True)
+                    table_placeholder.dataframe(df_live, use_container_width=True, hide_index=True)
                     
     # 將完成結果存入 session_state，讓換頁或排序時不需要重跑
     # scan_results: table data
@@ -363,10 +375,24 @@ if not results_df.empty and raw_data_dict:
                     upper_shadow = (df['High'] - df[['Open', 'Close']].max(axis=1))
                     shadow_ratio = (upper_shadow / range_size * 100).fillna(0)
                     
-                    hist_match = ((gap_up >= hist_cfg['min_gap']) & 
+                    valid_mask = ((gap_up >= hist_cfg['min_gap']) & 
                                   (vol_m >= hist_cfg['min_vol_m']) & 
                                   (prev_close >= hist_cfg['min_prev_close']) & 
-                                  (shadow_ratio >= hist_cfg['min_shadow_ratio'])).any()
+                                  (shadow_ratio >= hist_cfg['min_shadow_ratio']))
+                                  
+                    if 'time_range' in hist_cfg:
+                        min_m, max_m = hist_cfg['time_range']
+                        latest_date = df.index[-1]
+                        start_date = latest_date - pd.DateOffset(months=max_m)
+                        end_date = latest_date - pd.DateOffset(months=min_m)
+                        time_mask = (df.index >= start_date) & (df.index <= end_date)
+                        valid_mask = valid_mask & time_mask
+                        
+                    hist_match = valid_mask.any()
+                    if hist_match:
+                        latest_date_idx = df[valid_mask].index[-1]
+                        ext_date = latest_date_idx.strftime('%Y-%m-%d')
+                        ext_ret = gap_up.loc[latest_date_idx]
                 elif strategy_select == "3.QullaMaggie Breakout":
                     qm_days = int(hist_cfg['qm_days'])
                     if len(df) >= qm_days + 1:
@@ -431,6 +457,8 @@ if not results_df.empty and raw_data_dict:
             results_df["歷史暴漲幅度(%)"] = ext_ret_list
         elif strategy_select == "2.Fake Breakout Short":
             hist_col_name = "歷史假突破達標"
+            results_df["歷史假突破日期"] = ext_date_list
+            results_df["假突破Gap(%)"] = ext_ret_list
         else:
             hist_col_name = "QullaMaggie突破達標"
             qm_days = int(hist_cfg.get('qm_days', 20))
@@ -492,7 +520,7 @@ with tab1:
             st.session_state["saved_history"][now_str] = results_df.copy()
             st.success(f"已成功將 {len(results_df)} 檔潛在股儲存至「歷史庫存」標籤頁！")
     #Display a dynamic Pandas DataFrame in Streamlit.      
-    st.dataframe(results_df, use_container_width=True)
+    st.dataframe(results_df, use_container_width=True, hide_index=True)
 
 with tab2:
     st.subheader("個股技術線圖與指標")
