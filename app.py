@@ -90,6 +90,7 @@ with st.sidebar.expander("基礎配置與輸入", expanded=True):
 
 with st.sidebar.expander("技術指標篩選 (Client-Side)", expanded=False):
     sma_window = st.number_input("SMA 天數", value=50, step=5)
+    show_sma_cols = st.checkbox("在報表中顯示 SMA 相關欄位", value=True)
     # rsi_limit = st.number_input("RSI 上限 (找超賣)", value=30, step=5)
     # bb_window = st.number_input("布林通道天數", value=20, step=1)
 
@@ -225,19 +226,24 @@ if start_scan:
             # 我們保留初始紀錄，但不依賴它作為最終輸出 (因 UI 改動會全自動復寫)
             is_strict_passed = bool(cond_return_1d or cond_return_nd)
             
+            market_cap_val = info.get('marketCap', 'N/A')
+            if isinstance(market_cap_val, (int, float)):
+                market_cap_str = f"${market_cap_val / 1e6:.2f}M"
+            else:
+                market_cap_str = market_cap_val
+                
             result_dict = {
                 "Ticker": ticker,
                 "Name": company_name,
                 "Sector": sector_info,
-                "Close": round(latest_data['Close'], 2),
-                f"SMA_{sma_window}": round(latest_data[f'SMA_{sma_window}'], 2),
-                "Price > SMA": "✅" if cond_price_sma else "❌",
-                "1日漲幅(%)": round(latest_data['Return_1d'], 2),
-                f"{n_days_return}日漲幅(%)": round(latest_data[f'Return_{n_days_return}d'], 2),
-                "1日漲幅達標": "✅" if cond_return_1d else "❌",
-                f"{n_days_return}日漲幅達標": "✅" if cond_return_nd else "❌",
-                "_PassStrict": is_strict_passed
+                "Market Cap": market_cap_str,
+                "Close": round(latest_data['Close'], 2)
             }
+            if show_sma_cols:
+                result_dict[f"SMA_{sma_window}"] = round(latest_data[f'SMA_{sma_window}'], 2)
+                result_dict["Price > SMA"] = "✅" if cond_price_sma else "❌"
+                
+            result_dict["_PassStrict"] = is_strict_passed
             return {"ticker": ticker, "df": df, "result_dict": result_dict}
         except Exception:
             return None
@@ -286,11 +292,15 @@ results_df = pd.DataFrame(results)
 # 實踐「嚴格過濾」機制：即時更新 Table！
 # 解耦：當使用者在側邊欄調整 N 日、或漲幅下限時，直接重新計算並覆寫 dataframe
 if not results_df.empty and raw_data_dict:
-    cols_to_drop = [c for c in results_df.columns if "漲幅" in c or "_PassStrict" in c or "爆量" in c or "RVOL" in c or "歷史暴漲" in c or "歷史假突破" in c or "QullaMaggie" in c]
+    cols_to_drop = [c for c in results_df.columns if "漲幅" in c or "_PassStrict" in c or "爆量" in c or "RVOL" in c or "歷史暴漲" in c or "歷史假突破" in c or "QullaMaggie" in c or "SMA" in c]
     results_df = results_df.drop(columns=cols_to_drop, errors='ignore')
     
     ret_1d_list, ret_nd_list, pass_1d_list, pass_nd_list, pass_strict_list, pass_vol_list, rvol_list, pass_hist_list = [], [], [], [], [], [], [], []
     qm_recent_ret_list = []
+    ext_date_list = []
+    ext_ret_list = []
+    sma_val_list = []
+    price_sma_list = []
     
     for _, row in results_df.iterrows():
         ticker = row["Ticker"]
@@ -309,12 +319,18 @@ if not results_df.empty and raw_data_dict:
             is_strict = (cond_1d or cond_nd) if "OR" in match_logic else (cond_1d and cond_nd)
             
             qm_recent_ret = 0.0
+            ext_date = ""
+            ext_ret = 0.0
             if len(df) >= 2:
                 if strategy_select == "1.Extended Short":
                     daily_ret = (df['Close'] / df['Close'].shift(1) - 1) * 100
                     open_close_ret = (df['Close'] / df['Open'] - 1) * 100
-                    hist_match = ((daily_ret >= hist_cfg['min_daily_ret']) & 
-                                  (open_close_ret >= hist_cfg['min_body_ret'])).any()
+                    valid_mask = (daily_ret >= hist_cfg['min_daily_ret']) & (open_close_ret >= hist_cfg['min_body_ret'])
+                    hist_match = valid_mask.any()
+                    if hist_match:
+                        latest_date_idx = df[valid_mask].index[-1]
+                        ext_date = latest_date_idx.strftime('%Y-%m-%d')
+                        ext_ret = daily_ret.loc[latest_date_idx]
                 elif strategy_select == "2.Fake Breakout Short":
                     # 計算 Fake Breakout 邏輯
                     gap_up = (df['Open'] / df['Close'].shift(1) - 1) * 100
@@ -352,6 +368,13 @@ if not results_df.empty and raw_data_dict:
             rvol_list.append(round(rvol, 2))
             pass_hist_list.append("✅" if hist_match else "❌")
             qm_recent_ret_list.append(round(qm_recent_ret, 2) if not pd.isna(qm_recent_ret) else 0.0)
+            ext_date_list.append(ext_date)
+            ext_ret_list.append(round(ext_ret, 2))
+            
+            latest_sma = df[f'SMA_{sma_window}'].iloc[-1] if f'SMA_{sma_window}' in df.columns else 0.0
+            price_sma_cond = df['Close'].iloc[-1] > latest_sma if len(df) > 0 else False
+            sma_val_list.append(round(latest_sma, 2))
+            price_sma_list.append("✅" if price_sma_cond else "❌")
         else:
             ret_1d_list.append(0.0)
             ret_nd_list.append(0.0)
@@ -362,25 +385,41 @@ if not results_df.empty and raw_data_dict:
             rvol_list.append(0.0)
             pass_hist_list.append("❌")
             qm_recent_ret_list.append(0.0)
+            ext_date_list.append("")
+            ext_ret_list.append(0.0)
+            sma_val_list.append(0.0)
+            price_sma_list.append("❌")
             
-    #Pandas DataFrame always add column
-    results_df["1日漲幅(%)"] = ret_1d_list
-    results_df[f"{n_days_return}日漲幅(%)"] = ret_nd_list
-    results_df["1日漲幅達標"] = pass_1d_list
-    results_df[f"{n_days_return}日漲幅達標"] = pass_nd_list
-    # 根據策略決定欄位名稱
-    if strategy_select == "1.Extended Short":
-        hist_col_name = "歷史暴漲達標"
-    elif strategy_select == "2.Fake Breakout Short":
-        hist_col_name = "歷史假突破達標"
-    else:
-        hist_col_name = "QullaMaggie突破達標"
-        qm_days = int(hist_cfg.get('qm_days', 20))
-        results_df[f"QM_{qm_days}日內近期漲幅(%)"] = qm_recent_ret_list
+    if show_sma_cols:
+        results_df[f"SMA_{sma_window}"] = sma_val_list
+        results_df["Price > SMA"] = price_sma_list
         
-    results_df[hist_col_name] = pass_hist_list
-    results_df["RVOL (倍)"] = rvol_list
-    results_df["爆量達標"] = pass_vol_list
+    # Pandas DataFrame conditionally add columns based on strict filters
+    if strict_return_filter:
+        results_df["1日漲幅(%)"] = ret_1d_list
+        results_df[f"{n_days_return}日漲幅(%)"] = ret_nd_list
+        results_df["1日漲幅達標"] = pass_1d_list
+        results_df[f"{n_days_return}日漲幅達標"] = pass_nd_list
+        
+    if strict_history_filter:
+        # 根據策略決定欄位名稱
+        if strategy_select == "1.Extended Short":
+            hist_col_name = "歷史暴漲達標"
+            results_df["歷史暴漲日期"] = ext_date_list
+            results_df["歷史暴漲幅度(%)"] = ext_ret_list
+        elif strategy_select == "2.Fake Breakout Short":
+            hist_col_name = "歷史假突破達標"
+        else:
+            hist_col_name = "QullaMaggie突破達標"
+            qm_days = int(hist_cfg.get('qm_days', 20))
+            results_df[f"QM_{qm_days}日內近期漲幅(%)"] = qm_recent_ret_list
+            
+        results_df[hist_col_name] = pass_hist_list
+        
+    if strict_vol_filter:
+        results_df["RVOL (倍)"] = rvol_list
+        results_df["爆量達標"] = pass_vol_list
+        
     results_df["_PassStrict"] = pass_strict_list
     results_df["_PassStrictVol"] = [ v == "✅" for v in pass_vol_list ]
     results_df["_PassStrictHist"] = [ v == "✅" for v in pass_hist_list ]

@@ -85,7 +85,8 @@ class FMPProvider(DataProvider):
                 profile = data[0]
                 return {
                     'shortName': profile.get('companyName', ticker),
-                    'sector': profile.get('sector', 'N/A')
+                    'sector': profile.get('sector', 'N/A'),
+                    'marketCap': profile.get('marketCap', 'N/A')
                 }
         except Exception:
             pass
