@@ -68,7 +68,7 @@ with st.sidebar.expander("基礎配置與輸入", expanded=True):
         sector = st.selectbox("Sector (大板塊)", ["", "Technology", "Healthcare", "Financial Services", "Energy", "Consumer Cyclical", "Industrials", "Consumer Defensive", "Basic Materials", "Utilities", "Real Estate", "Communication Services"])
         industry_list = ["", "Semiconductors", "Software - Infrastructure", "Consumer Electronics", "Banks - Diversified", "Biotechnology"]
         industry = st.selectbox("Industry (細分產業)", industry_list)
-        limit = st.slider("最大返回數量", 10, 1000, 1000)
+        limit = st.slider("最大返回數量", 100, 10000, 5000, step=100)
         st.markdown("---")
         
         if fmp_api_key:
@@ -171,7 +171,8 @@ if start_scan:
                     tickers.append(sym)
                     st.session_state["ticker_info_cache"][sym] = {
                         "shortName": item.get("companyName", sym),
-                        "sector": item.get("sector", "N/A")
+                        "sector": item.get("sector", "N/A"),
+                        "marketCap": item.get("marketCap", "N/A")
                     }
         if not tickers:
             st.warning("API 篩選找不到任何股票或發生錯誤。請放寬條件！")

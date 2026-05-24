@@ -151,7 +151,7 @@ class FMPProvider(DataProvider):
             response = requests.get(url)
             data = response.json()
             if isinstance(data, list):
-                return [{"symbol": item["symbol"], "companyName": item.get("companyName", item.get("symbol")), "sector": item.get("sector", "N/A")} for item in data if "symbol" in item]
+                return [{"symbol": item["symbol"], "companyName": item.get("companyName", item.get("symbol")), "sector": item.get("sector", "N/A"), "marketCap": item.get("marketCap", "N/A")} for item in data if "symbol" in item]
         except Exception as e:
             st.error(f"Error fetching from FMP Screener: {e}")
         return []
@@ -175,42 +175,7 @@ def get_basic_info(ticker: str, provider_name: str, api_key: str = "") -> dict:
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_fmp_screener_tickers(api_key: str, params: dict) -> list:
     provider = FMPProvider(api_key)
-    
-    p_min = params.get("priceMoreThan", 0)
-    p_max = params.get("priceLowerThan", 0)
-    
-    # 若有給定有效的上下界價格區間，啟動多區間自動分桶爬取機制
-    if p_max > p_min and p_max > 0:
-        import concurrent.futures
-        num_chunks = 5
-        price_step = (p_max - p_min) / num_chunks
-        
-        chunk_params = []
-        for i in range(num_chunks):
-            cp = params.copy()
-            chunk_p_min = p_min + i * price_step
-            chunk_p_max = p_min + (i + 1) * price_step if i < num_chunks - 1 else p_max
-            
-            cp["priceMoreThan"] = round(chunk_p_min, 2)
-            cp["priceLowerThan"] = round(chunk_p_max, 2)
-            chunk_params.append(cp)
-            
-        all_items = {}
-        # 並行發送多個 Screener 請求
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_cp = {executor.submit(provider.fetch_screener_tickers, cp): cp for cp in chunk_params}
-            for future in concurrent.futures.as_completed(future_to_cp):
-                try:
-                    res = future.result()
-                    if res:
-                        for item in res:
-                            all_items[item["symbol"]] = item
-                except Exception:
-                    pass
-        return list(all_items.values())
-    else:
-        # 沒有設定上限，或是條件不構成區間時，回退到單次請求模式
-        return provider.fetch_screener_tickers(params)
+    return provider.fetch_screener_tickers(params)
 
 @st.cache_data(ttl=600, show_spinner=False)
 def get_aftermarket_quote(ticker: str, provider_name: str, api_key: str = "") -> dict:
