@@ -111,6 +111,14 @@ with st.sidebar.expander("動能漲幅與爆量篩選 (Client-Side)", expanded=T
         hist_cfg['min_daily_ret'] = st.number_input("曾經單日總漲幅大於 (%)", value=90.0, step=10.0)
         hist_cfg['min_body_ret'] = st.number_input("曾經單日實體(開到收)大於 (%)", value=70.0, step=10.0)
         
+        with st.expander("進階篩選設定 (隔 N 日漲跌幅)"):
+            hist_cfg['enable_adv'] = st.checkbox("啟用進階篩選數值計算 (顯示欄位)", value=False)
+            hist_cfg['adv_n_days'] = st.number_input("隔 N 日", value=1, min_value=1, step=1)
+            hist_cfg['adv_ret_dir'] = st.radio("方向", ["漲", "跌"], horizontal=True)
+            hist_cfg['adv_ret_type'] = st.radio("條件", ["大於", "小於"], horizontal=True)
+            hist_cfg['adv_ret_val'] = st.number_input("百分比 (%)", value=0.0, step=1.0, min_value=0.0)
+            hist_cfg['adv_strict'] = st.checkbox("嚴格過濾未達標標的", value=False)
+
         period_to_months = {"1mo": 1, "3mo": 3, "6mo": 6, "1y": 12, "2y": 24, "5y": 60, "max": 120}
         max_months = period_to_months.get(period, 120)
         hist_cfg['time_range'] = st.slider(
@@ -121,7 +129,7 @@ with st.sidebar.expander("動能漲幅與爆量篩選 (Client-Side)", expanded=T
             step=1,
             help="選擇要尋找暴漲紀錄的時間範圍。例如 (0, 6) 代表最近 6 個月內；(6, 12) 代表半年前到一年前的區間。"
         )
-        
+            
         strict_history_filter = st.checkbox("啟用歷史暴漲過濾 (獨立篩選)", value=False)
     elif strategy_select == "2.Fake Breakout Short":
         hist_cfg['min_gap'] = st.number_input("gap up漲幅大於 (%)", value=30.0, step=5.0)
@@ -332,6 +340,7 @@ if not results_df.empty and raw_data_dict:
     qm_recent_ret_list = []
     ext_date_list = []
     ext_ret_list = []
+    adv_ret_list = []
     sma_val_list = []
     price_sma_list = []
     
@@ -354,6 +363,7 @@ if not results_df.empty and raw_data_dict:
             qm_recent_ret = 0.0
             ext_date = ""
             ext_ret = 0.0
+            adv_ret = "N/A"
             if len(df) >= 2:
                 if strategy_select == "1.Extended Short":
                     daily_ret = (df['Close'] / df['Close'].shift(1) - 1) * 100
@@ -368,11 +378,30 @@ if not results_df.empty and raw_data_dict:
                         time_mask = (df.index >= start_date) & (df.index <= end_date)
                         valid_mask = valid_mask & time_mask
                         
+                    if hist_cfg.get('enable_adv'):
+                        n_days = hist_cfg['adv_n_days']
+                        future_ret = (df['Close'].shift(-n_days) / df['Close'] - 1) * 100
+                        if hist_cfg.get('adv_strict'):
+                            if hist_cfg['adv_ret_dir'] == "漲":
+                                if hist_cfg['adv_ret_type'] == "大於":
+                                    adv_mask = future_ret >= hist_cfg['adv_ret_val']
+                                else:
+                                    adv_mask = (future_ret > 0) & (future_ret <= hist_cfg['adv_ret_val'])
+                            else: # 跌
+                                if hist_cfg['adv_ret_type'] == "大於":
+                                    adv_mask = future_ret <= -hist_cfg['adv_ret_val']
+                                else:
+                                    adv_mask = (future_ret < 0) & (future_ret >= -hist_cfg['adv_ret_val'])
+                            valid_mask = valid_mask & adv_mask
+                        
                     hist_match = valid_mask.any()
                     if hist_match:
                         latest_date_idx = df[valid_mask].index[-1]
                         ext_date = latest_date_idx.strftime('%Y-%m-%d')
                         ext_ret = daily_ret.loc[latest_date_idx]
+                        if hist_cfg.get('enable_adv'):
+                            adv_val = future_ret.loc[latest_date_idx]
+                            adv_ret = round(adv_val, 2) if not pd.isna(adv_val) else "N/A"
                 elif strategy_select == "2.Fake Breakout Short":
                     # 計算 Fake Breakout 邏輯
                     gap_up = (df['Open'] / df['Close'].shift(1) - 1) * 100
@@ -426,6 +455,7 @@ if not results_df.empty and raw_data_dict:
             qm_recent_ret_list.append(round(qm_recent_ret, 2) if not pd.isna(qm_recent_ret) else 0.0)
             ext_date_list.append(ext_date)
             ext_ret_list.append(round(ext_ret, 2))
+            adv_ret_list.append(adv_ret)
             
             latest_sma = df[f'SMA_{sma_window}'].iloc[-1] if f'SMA_{sma_window}' in df.columns else 0.0
             price_sma_cond = df['Close'].iloc[-1] > latest_sma if len(df) > 0 else False
@@ -443,6 +473,7 @@ if not results_df.empty and raw_data_dict:
             qm_recent_ret_list.append(0.0)
             ext_date_list.append("")
             ext_ret_list.append(0.0)
+            adv_ret_list.append("N/A")
             sma_val_list.append(0.0)
             price_sma_list.append("❌")
             
@@ -463,6 +494,8 @@ if not results_df.empty and raw_data_dict:
             hist_col_name = "歷史暴漲達標"
             results_df["歷史暴漲日期"] = ext_date_list
             results_df["歷史暴漲幅度(%)"] = ext_ret_list
+            if hist_cfg.get('enable_adv'):
+                results_df[f"隔{hist_cfg['adv_n_days']}日漲跌幅(%)"] = adv_ret_list
         elif strategy_select == "2.Fake Breakout Short":
             hist_col_name = "歷史假突破達標"
             results_df["歷史假突破日期"] = ext_date_list
