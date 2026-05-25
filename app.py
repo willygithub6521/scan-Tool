@@ -142,7 +142,15 @@ with st.sidebar.expander("動能漲幅與爆量篩選 (Client-Side)", expanded=T
         
         strict_history_filter = st.checkbox("啟用歷史假突破過濾 (獨立篩選)", value=False)
     elif strategy_select == "3.QullaMaggie Breakout":
-        hist_cfg['qm_days'] = st.number_input("前 N 日區間 (天)", value=20, min_value=1, step=1)
+        input_type = st.radio("時間區間設定方式", ["依月份選擇", "手動輸入天數"], horizontal=True)
+        if input_type == "依月份選擇":
+            month_opts = {"1個月": 21, "3個月": 63, "6個月": 126, "12個月": 252, "18個月": 378}
+            sel_month = st.selectbox("前 N 個月區間", list(month_opts.keys()), index=1)
+            hist_cfg['qm_days'] = month_opts[sel_month]
+            st.caption(f"已自動轉換為 {hist_cfg['qm_days']} 個交易日")
+        else:
+            hist_cfg['qm_days'] = st.number_input("前 N 日區間 (天)", value=20, min_value=1, step=1)
+            
         hist_cfg['qm_min_ret'] = st.number_input("期間漲幅大於 (%)", value=30.0, step=5.0)
         strict_history_filter = st.checkbox("啟用 QullaMaggie 突破過濾 (獨立篩選)", value=False)
     
