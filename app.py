@@ -9,6 +9,14 @@ import numpy as np
 
 st.set_page_config(page_title="Stock Scanner Tool PRO", layout="wide")
 
+st.sidebar.title("導覽 / Navigation")
+app_mode = st.sidebar.radio("選擇功能分頁", ["1. 歷史策略掃描 (Historical)", "2. 即時監控篩選 (Real-time Screener)"])
+
+if app_mode == "2. 即時監控篩選 (Real-time Screener)":
+    import views.real_time_screener as rts
+    rts.render_page()
+    st.stop()
+
 st.title("📈 Stock Scanner Tool (Phase 3 + Screener API)")
 
 # --- Sidebar ---
@@ -90,7 +98,7 @@ with st.sidebar.expander("基礎配置與輸入", expanded=True):
 
 with st.sidebar.expander("技術指標篩選 (Client-Side)", expanded=False):
     sma_window = st.number_input("SMA 天數", value=50, step=5)
-    show_sma_cols = st.checkbox("在報表中顯示 SMA 相關欄位", value=True)
+    show_sma_cols = st.checkbox("在報表中顯示 SMA 相關欄位", value=False)
     # rsi_limit = st.number_input("RSI 上限 (找超賣)", value=30, step=5)
     # bb_window = st.number_input("布林通道天數", value=20, step=1)
 

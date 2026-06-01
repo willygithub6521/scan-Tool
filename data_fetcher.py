@@ -156,6 +156,54 @@ class FMPProvider(DataProvider):
             st.error(f"Error fetching from FMP Screener: {e}")
         return []
 
+    def fetch_biggest_gainers(self) -> list:
+        url = f"{self.base_url}/biggest-gainers?apikey={self.api_key}"
+        try:
+            response = requests.get(url)
+            data = response.json()
+            if isinstance(data, list):
+                return data
+        except Exception as e:
+            st.error(f"Error fetching biggest gainers from FMP: {e}")
+        return []
+
+    def fetch_quotes(self, tickers: list) -> list:
+        if not tickers:
+            return []
+        symbols = ",".join(tickers)
+        url = f"{self.base_url}/quote/{symbols}?apikey={self.api_key}"
+        try:
+            response = requests.get(url)
+            data = response.json()
+            if isinstance(data, list):
+                return data
+        except Exception as e:
+            st.error(f"Error fetching quotes from FMP: {e}")
+        return []
+
+    def fetch_floats(self, tickers: list) -> dict:
+        # Note: FMP v4 for shares_float usually requires querying one by one or comma separated depending on plan.
+        # v4/shares_float/symbol
+        floats = {}
+        # Try to batch if supported, otherwise do simple batching or one-by-one.
+        # Actually FMP /v4/shares_float/AAPL,MSFT works for some plans. Let's try it.
+        if not tickers:
+            return floats
+        
+        symbols = ",".join(tickers)
+        # Using base_url which is stable (v3 usually, but v4 is separate. Let's use https://financialmodelingprep.com/api/v4)
+        url = f"https://financialmodelingprep.com/api/v4/shares_float?symbol={symbols}&apikey={self.api_key}"
+        try:
+            response = requests.get(url)
+            data = response.json()
+            if isinstance(data, list):
+                for item in data:
+                    if "symbol" in item and "floatShares" in item:
+                        floats[item["symbol"]] = item["floatShares"]
+        except Exception:
+            pass
+        return floats
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_historical_data(ticker: str, provider_name: str, period: str, api_key: str = "") -> pd.DataFrame:
     if provider_name == "FMP":
@@ -193,3 +241,14 @@ def get_stock_news(ticker: str, provider_name: str, api_key: str = "", limit: in
 def get_intraday_data(ticker: str, interval: str, from_date: str, to_date: str, api_key: str = "") -> pd.DataFrame:
     """取得 FMP 分鐘線資料快取版 (TTL=10min)，僅支援 FMP Starter Plan 以上"""
     return FMPProvider(api_key).fetch_intraday_data(ticker, interval, from_date, to_date)
+
+# Real-time screener specific functions (no cache or very short cache)
+def get_realtime_biggest_gainers(api_key: str) -> list:
+    return FMPProvider(api_key).fetch_biggest_gainers()
+
+def get_realtime_quotes(api_key: str, tickers: list) -> list:
+    return FMPProvider(api_key).fetch_quotes(tickers)
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_floats(api_key: str, tickers: list) -> dict:
+    return FMPProvider(api_key).fetch_floats(tickers)
