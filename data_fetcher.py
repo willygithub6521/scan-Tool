@@ -171,7 +171,7 @@ class FMPProvider(DataProvider):
         if not tickers:
             return []
         symbols = ",".join(tickers)
-        url = f"{self.base_url}/quote/{symbols}?apikey={self.api_key}"
+        url = f"{self.base_url}/quote?symbol={symbols}&apikey={self.api_key}"
         try:
             response = requests.get(url)
             data = response.json()
@@ -191,8 +191,8 @@ class FMPProvider(DataProvider):
             return floats
         
         symbols = ",".join(tickers)
-        # Using base_url which is stable (v3 usually, but v4 is separate. Let's use https://financialmodelingprep.com/api/v4)
-        url = f"https://financialmodelingprep.com/api/v4/shares_float?symbol={symbols}&apikey={self.api_key}"
+        # Use the stable endpoint as requested
+        url = f"{self.base_url}/shares-float?symbol={symbols}&apikey={self.api_key}"
         try:
             response = requests.get(url)
             data = response.json()
