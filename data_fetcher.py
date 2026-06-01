@@ -170,38 +170,63 @@ class FMPProvider(DataProvider):
     def fetch_quotes(self, tickers: list) -> list:
         if not tickers:
             return []
-        symbols = ",".join(tickers)
-        url = f"{self.base_url}/quote?symbol={symbols}&apikey={self.api_key}"
-        try:
-            response = requests.get(url)
-            data = response.json()
-            if isinstance(data, list):
-                return data
-        except Exception as e:
-            st.error(f"Error fetching quotes from FMP: {e}")
-        return []
+            
+        results = []
+        import concurrent.futures
+        
+        def fetch_single(ticker):
+            url = f"{self.base_url}/quote?symbol={ticker}&apikey={self.api_key}"
+            try:
+                response = requests.get(url, timeout=10)
+                if response.status_code != 200:
+                    st.error(f"FMP Quote API Error ({response.status_code}) for {ticker}: {response.text}")
+                    return None
+                data = response.json()
+                if isinstance(data, list) and len(data) > 0:
+                    return data[0]
+            except Exception as e:
+                st.error(f"Error fetching quote for {ticker}: {e}")
+            return None
+            
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(fetch_single, t) for t in tickers]
+            for future in concurrent.futures.as_completed(futures):
+                res = future.result()
+                if res:
+                    results.append(res)
+                    
+        return results
 
     def fetch_floats(self, tickers: list) -> dict:
-        # Note: FMP v4 for shares_float usually requires querying one by one or comma separated depending on plan.
-        # v4/shares_float/symbol
         floats = {}
-        # Try to batch if supported, otherwise do simple batching or one-by-one.
-        # Actually FMP /v4/shares_float/AAPL,MSFT works for some plans. Let's try it.
         if not tickers:
             return floats
+            
+        import concurrent.futures
         
-        symbols = ",".join(tickers)
-        # Use the stable endpoint as requested
-        url = f"{self.base_url}/shares-float?symbol={symbols}&apikey={self.api_key}"
-        try:
-            response = requests.get(url)
-            data = response.json()
-            if isinstance(data, list):
-                for item in data:
+        def fetch_single_float(ticker):
+            url = f"{self.base_url}/shares-float?symbol={ticker}&apikey={self.api_key}"
+            try:
+                response = requests.get(url, timeout=10)
+                if response.status_code != 200:
+                    # Only print once to avoid spamming the screen
+                    return None
+                data = response.json()
+                if isinstance(data, list) and len(data) > 0:
+                    item = data[0]
                     if "symbol" in item and "floatShares" in item:
-                        floats[item["symbol"]] = item["floatShares"]
-        except Exception:
-            pass
+                        return (item["symbol"], item["floatShares"])
+            except Exception:
+                pass
+            return None
+            
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(fetch_single_float, t) for t in tickers]
+            for future in concurrent.futures.as_completed(futures):
+                res = future.result()
+                if res:
+                    floats[res[0]] = res[1]
+                    
         return floats
 
 @st.cache_data(ttl=3600, show_spinner=False)
