@@ -86,7 +86,7 @@ def render_page():
         price = quote.get('price', 0)
         open_price = quote.get('open', 0)
         prev_close = quote.get('previousClose', 0)
-        changes_pct = quote.get('changesPercentage', 0)
+        changes_pct = quote.get('changePercentage', 0)
         market_cap = quote.get('marketCap', 0)
         
         # Calculate metrics
