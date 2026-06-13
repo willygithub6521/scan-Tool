@@ -229,6 +229,35 @@ class FMPProvider(DataProvider):
                     
         return floats
 
+    def fetch_5min_closes(self, tickers: list) -> dict:
+        closes = {}
+        if not tickers:
+            return closes
+            
+        import concurrent.futures
+        
+        def fetch_single(ticker):
+            url = f"{self.base_url}/historical-chart/5min?symbol={ticker}&apikey={self.api_key}"
+            try:
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    if isinstance(data, list) and len(data) >= 2:
+                        # data[0] is the current or most recent candle, data[1] is the previous completed candle
+                        return (ticker, data[1]['close'])
+            except Exception:
+                pass
+            return None
+            
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(fetch_single, t) for t in tickers]
+            for future in concurrent.futures.as_completed(futures):
+                res = future.result()
+                if res:
+                    closes[res[0]] = res[1]
+                    
+        return closes
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_historical_data(ticker: str, provider_name: str, period: str, api_key: str = "") -> pd.DataFrame:
     if provider_name == "FMP":
@@ -277,3 +306,6 @@ def get_realtime_quotes(api_key: str, tickers: list) -> list:
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_floats(api_key: str, tickers: list) -> dict:
     return FMPProvider(api_key).fetch_floats(tickers)
+
+def get_realtime_5min_closes(api_key: str, tickers: list) -> dict:
+    return FMPProvider(api_key).fetch_5min_closes(tickers)
