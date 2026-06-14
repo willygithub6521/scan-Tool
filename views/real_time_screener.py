@@ -4,7 +4,13 @@ import pandas as pd
 from streamlit_autorefresh import st_autorefresh
 import time
 import threading
-from data_fetcher import get_realtime_biggest_gainers, get_realtime_quotes, get_floats, get_realtime_5min_closes
+from data_fetcher import (
+    get_realtime_biggest_gainers,
+    get_realtime_quotes,
+    get_floats,
+    get_realtime_5min_closes,
+    get_realtime_1min_closes
+)
 
 # --- Global State for Background Thread ---
 @st.cache_resource
@@ -15,13 +21,21 @@ def get_global_rts_state():
         "data": {
             "gainers": None,
             "quotes": None,
-            "floats": None,
+            "floats": {},
             "closes_5min": None,
+            "closes_1min": None,
+            "resolved_interval": "5min",
             "fetch_time": None
         },
         "is_fetching": False,
         "has_prefetched": False,
-        "thread": None
+        "thread": None,
+        "settings": {
+            "interval": "Auto (根據更新頻率)",
+            "today_only": True,
+            "extended": True,
+            "auto_refresh_mins": 5
+        }
     }
 
 RTS_STATE = get_global_rts_state()
@@ -49,14 +63,57 @@ def start_background_thread(state):
                             if gainers:
                                 tickers = [item['symbol'] for item in gainers if 'symbol' in item]
                                 quotes = get_realtime_quotes(api_key, tickers) if tickers else []
-                                floats = get_floats(api_key, tickers) if tickers else {}
-                                closes_5min = get_realtime_5min_closes(api_key, tickers) if tickers else {}
+                                
+                                # 1. Optimize float fetching: only fetch floats for missing tickers
+                                existing_floats = state_dict["data"].get("floats") or {}
+                                missing_tickers = [t for t in tickers if t not in existing_floats]
+                                if missing_tickers:
+                                    new_floats = get_floats(api_key, missing_tickers)
+                                    existing_floats.update(new_floats)
+                                    # Mark missing ones that weren't found as 0 to prevent repeating queries
+                                    for t in missing_tickers:
+                                        if t not in existing_floats:
+                                            existing_floats[t] = 0
+                                
+                                # 2. Determine settings
+                                settings = state_dict.get("settings", {
+                                    "interval": "Auto (根據更新頻率)",
+                                    "today_only": True,
+                                    "extended": True,
+                                    "auto_refresh_mins": 5
+                                })
+                                
+                                # Resolve actual interval
+                                resolved_interval = "5min"
+                                interval_setting = settings.get("interval", "Auto (根據更新頻率)")
+                                if "Auto" in interval_setting:
+                                    ref_mins = settings.get("auto_refresh_mins", 5)
+                                    resolved_interval = "1min" if ref_mins < 5 else "5min"
+                                elif "1min" in interval_setting:
+                                    resolved_interval = "1min"
+                                else:
+                                    resolved_interval = "5min"
+                                    
+                                # Resolve from_date
+                                from_date = ""
+                                if settings.get("today_only", True):
+                                    from_date = pd.Timestamp.now('US/Eastern').strftime('%Y-%m-%d')
+                                    
+                                extended = settings.get("extended", True)
+                                
+                                # 3. Fetch closes
+                                if resolved_interval == "1min":
+                                    closes_data = get_realtime_1min_closes(api_key, tickers, from_date=from_date, extended=extended)
+                                else:
+                                    closes_data = get_realtime_5min_closes(api_key, tickers, from_date=from_date, extended=extended)
                                 
                                 state_dict["data"] = {
                                     "gainers": gainers,
                                     "quotes": quotes,
-                                    "floats": floats,
-                                    "closes_5min": closes_5min,
+                                    "floats": existing_floats,
+                                    "closes_5min": closes_data if resolved_interval == "5min" else None,
+                                    "closes_1min": closes_data if resolved_interval == "1min" else None,
+                                    "resolved_interval": resolved_interval,
                                     "fetch_time": pd.Timestamp.now()
                                 }
                         except Exception as e:
@@ -105,6 +162,33 @@ def render_page():
         st.session_state["rts_refresh_count"] = 0
         st.session_state["prev_auto_refresh_mins"] = auto_refresh_mins
 
+    # Advanced FMP Settings expander (Integrated settings panel)
+    with st.sidebar.expander("⚙️ FMP 進階設定 (Premium)", expanded=True):
+        intraday_interval = st.selectbox(
+            "收盤價分鐘級距",
+            options=["Auto (根據更新頻率)", "1min", "5min"],
+            index=0
+        )
+        today_only = st.checkbox("僅限今日數據 (減小傳輸)", value=True)
+        extended_hours = st.checkbox("包含盤前/盤後數據 (Extended)", value=True)
+
+    # Sync settings into the global RTS_STATE so background thread can access them
+    RTS_STATE["settings"] = {
+        "interval": intraday_interval,
+        "today_only": today_only,
+        "extended": extended_hours,
+        "auto_refresh_mins": auto_refresh_mins
+    }
+
+    # Resolve actual interval for UI and instant fetching
+    resolved_interval_ui = "5min"
+    if "Auto" in intraday_interval:
+        resolved_interval_ui = "1min" if auto_refresh_mins < 5 else "5min"
+    elif "1min" in intraday_interval:
+        resolved_interval_ui = "1min"
+    else:
+        resolved_interval_ui = "5min"
+
     # Detect interval change to properly restart timer
     if st.session_state.get("prev_auto_refresh_mins", auto_refresh_mins) != auto_refresh_mins:
         st.session_state["prev_auto_refresh_mins"] = auto_refresh_mins
@@ -123,13 +207,32 @@ def render_page():
             tickers = [item['symbol'] for item in gainers if 'symbol' in item]
             with st.spinner(f"正在獲取 {len(tickers)} 檔股票的即時報價與 Float..."):
                 quotes = get_realtime_quotes(fmp_api_key, tickers) if tickers else []
-                floats = get_floats(fmp_api_key, tickers) if tickers else {}
-                closes_5min = get_realtime_5min_closes(fmp_api_key, tickers) if tickers else {}
+                
+                # Optimize floats: retrieve only what's missing in local state
+                existing_floats = RTS_STATE["data"].get("floats") or {}
+                missing_tickers = [t for t in tickers if t not in existing_floats]
+                if missing_tickers:
+                    new_floats = get_floats(fmp_api_key, missing_tickers)
+                    existing_floats.update(new_floats)
+                    for t in missing_tickers:
+                        if t not in existing_floats:
+                            existing_floats[t] = 0
+                
+                # Resolve date & extended parameters
+                from_date = pd.Timestamp.now('US/Eastern').strftime('%Y-%m-%d') if today_only else ""
+                
+                if resolved_interval_ui == "1min":
+                    closes_data = get_realtime_1min_closes(fmp_api_key, tickers, from_date=from_date, extended=extended_hours)
+                else:
+                    closes_data = get_realtime_5min_closes(fmp_api_key, tickers, from_date=from_date, extended=extended_hours)
+                
                 RTS_STATE["data"] = {
                     "gainers": gainers,
                     "quotes": quotes,
-                    "floats": floats,
-                    "closes_5min": closes_5min,
+                    "floats": existing_floats,
+                    "closes_5min": closes_data if resolved_interval_ui == "5min" else None,
+                    "closes_1min": closes_data if resolved_interval_ui == "1min" else None,
+                    "resolved_interval": resolved_interval_ui,
                     "fetch_time": pd.Timestamp.now()
                 }
         else:
@@ -157,7 +260,7 @@ def render_page():
     min_gap = st.sidebar.number_input("Gap 跳空大於 (%)", value=0.0, step=1.0)
     min_gainer = st.sidebar.number_input("Gainer 漲幅大於 (%)", value=5.0, step=1.0)
     min_intraday = st.sidebar.number_input("開盤到目前漲幅大於 (%)", value=0.0, step=1.0)
-    min_5min_pct = st.sidebar.number_input("最近5分鐘漲幅大於 (%)", value=0.0, step=1.0)
+    min_interval_pct = st.sidebar.number_input(f"最近{resolved_interval_ui}漲幅大於 (%)", value=0.0, step=1.0)
     
     col_mc1, col_mc2 = st.sidebar.columns(2)
     min_mc_m = col_mc1.number_input("最低市值 (M)", value=0.0, step=10.0)
@@ -180,14 +283,32 @@ def render_page():
                 tickers = [item['symbol'] for item in gainers if 'symbol' in item]
                 with st.spinner(f"正在獲取 {len(tickers)} 檔股票的即時報價與 Float..."):
                     quotes = get_realtime_quotes(fmp_api_key, tickers)
-                    floats = get_floats(fmp_api_key, tickers)
-                    closes_5min = get_realtime_5min_closes(fmp_api_key, tickers)
+                    
+                    # Optimize floats
+                    existing_floats = RTS_STATE["data"].get("floats") or {}
+                    missing_tickers = [t for t in tickers if t not in existing_floats]
+                    if missing_tickers:
+                        new_floats = get_floats(fmp_api_key, missing_tickers)
+                        existing_floats.update(new_floats)
+                        for t in missing_tickers:
+                            if t not in existing_floats:
+                                existing_floats[t] = 0
+                                
+                    # Resolve date & extended parameters
+                    from_date = pd.Timestamp.now('US/Eastern').strftime('%Y-%m-%d') if today_only else ""
+                    
+                    if resolved_interval_ui == "1min":
+                        closes_data = get_realtime_1min_closes(fmp_api_key, tickers, from_date=from_date, extended=extended_hours)
+                    else:
+                        closes_data = get_realtime_5min_closes(fmp_api_key, tickers, from_date=from_date, extended=extended_hours)
                     
                     data_cache = {
                         "gainers": gainers,
                         "quotes": quotes,
-                        "floats": floats,
-                        "closes_5min": closes_5min,
+                        "floats": existing_floats,
+                        "closes_5min": closes_data if resolved_interval_ui == "5min" else None,
+                        "closes_1min": closes_data if resolved_interval_ui == "1min" else None,
+                        "resolved_interval": resolved_interval_ui,
                         "fetch_time": pd.Timestamp.now()
                     }
                     RTS_STATE["data"] = data_cache
@@ -208,8 +329,15 @@ def render_page():
         return
 
     quotes_data = data_cache["quotes"]
-    floats_dict = data_cache["floats"]
-    closes_5min_dict = data_cache["closes_5min"]
+    floats_dict = data_cache.get("floats") or {}
+    resolved_interval = data_cache.get("resolved_interval", "5min")
+    
+    if resolved_interval == "1min":
+        closes_dict = data_cache.get("closes_1min") or {}
+        pct_col_name = "最近1分鐘漲幅 (%)"
+    else:
+        closes_dict = data_cache.get("closes_5min") or {}
+        pct_col_name = "最近5分鐘漲幅 (%)"
     
     # 4. Process and Filter (Instantaneous, using cached data)
     results = []
@@ -232,14 +360,14 @@ def render_page():
         float_shares = floats_dict.get(ticker, 0)
         float_m = float_shares / 1e6 if float_shares else 0
         
-        prev_5min_close = closes_5min_dict.get(ticker, 0)
-        recent_5min_pct = ((price / prev_5min_close - 1) * 100) if prev_5min_close and prev_5min_close > 0 else 0
+        prev_candle_close = closes_dict.get(ticker, 0)
+        recent_candle_pct = ((price / prev_candle_close - 1) * 100) if prev_candle_close and prev_candle_close > 0 else 0
         
         # Check conditions
         cond_gap = gap_pct >= min_gap
         cond_gainer = changes_pct >= min_gainer
         cond_intraday = intraday_pct >= min_intraday
-        cond_5min = recent_5min_pct >= min_5min_pct
+        cond_5min = recent_candle_pct >= min_interval_pct
         
         # Market Cap bounds
         cond_mc = True
@@ -259,7 +387,7 @@ def render_page():
             "Gap (%)": round(gap_pct, 2),
             "Gainer (%)": round(changes_pct, 2),
             "開盤到目前漲幅 (%)": round(intraday_pct, 2),
-            "最近5分鐘漲幅 (%)": round(recent_5min_pct, 2) if prev_5min_close > 0 else 0.0,
+            pct_col_name: round(recent_candle_pct, 2) if prev_candle_close > 0 else 0.0,
             "Market Cap (M)": round(mc_m, 2) if mc_m > 0 else "N/A",
             "Float (M)": round(float_m, 2) if float_m > 0 else "N/A",
             "達標 Signal": "✅" if is_passed else "❌",
@@ -279,11 +407,10 @@ def render_page():
                 return f'color: {color}'
             return ''
             
-        styled_df = df_results.style.map(color_returns, subset=["Gap (%)", "Gainer (%)", "開盤到目前漲幅 (%)", "最近5分鐘漲幅 (%)"])
+        styled_df = df_results.style.map(color_returns, subset=["Gap (%)", "Gainer (%)", "開盤到目前漲幅 (%)", pct_col_name])
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
     else:
         st.warning("目前沒有任何股票符合您的即時篩選條件。")
 
 if __name__ == "__main__":
     render_page()
-

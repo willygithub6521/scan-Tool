@@ -171,30 +171,22 @@ class FMPProvider(DataProvider):
         if not tickers:
             return []
             
+        chunk_size = 100
         results = []
-        import concurrent.futures
-        
-        def fetch_single(ticker):
-            url = f"{self.base_url}/quote?symbol={ticker}&apikey={self.api_key}"
+        for i in range(0, len(tickers), chunk_size):
+            chunk = tickers[i:i+chunk_size]
+            symbols_str = ",".join(chunk)
+            url = f"{self.base_url}/batch-quote?symbols={symbols_str}&apikey={self.api_key}"
             try:
-                response = requests.get(url, timeout=10)
-                if response.status_code != 200:
-                    st.error(f"FMP Quote API Error ({response.status_code}) for {ticker}: {response.text}")
-                    return None
-                data = response.json()
-                if isinstance(data, list) and len(data) > 0:
-                    return data[0]
+                response = requests.get(url, timeout=15)
+                if response.status_code == 200:
+                    data = response.json()
+                    if isinstance(data, list):
+                        results.extend(data)
+                else:
+                    st.error(f"FMP Batch Quote API Error ({response.status_code}): {response.text}")
             except Exception as e:
-                st.error(f"Error fetching quote for {ticker}: {e}")
-            return None
-            
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(fetch_single, t) for t in tickers]
-            for future in concurrent.futures.as_completed(futures):
-                res = future.result()
-                if res:
-                    results.append(res)
-                    
+                st.error(f"Error fetching batch quotes: {e}")
         return results
 
     def fetch_floats(self, tickers: list) -> dict:
@@ -229,7 +221,7 @@ class FMPProvider(DataProvider):
                     
         return floats
 
-    def fetch_5min_closes(self, tickers: list) -> dict:
+    def fetch_5min_closes(self, tickers: list, from_date: str = "", extended: bool = False) -> dict:
         closes = {}
         if not tickers:
             return closes
@@ -238,23 +230,74 @@ class FMPProvider(DataProvider):
         
         def fetch_single(ticker):
             url = f"{self.base_url}/historical-chart/5min?symbol={ticker}&apikey={self.api_key}"
+            if extended:
+                url += "&extended=true"
+            
+            url_with_from = url
+            if from_date:
+                url_with_from += f"&from={from_date}"
+                
             try:
-                response = requests.get(url, timeout=10)
+                response = requests.get(url_with_from, timeout=10)
                 if response.status_code == 200:
                     data = response.json()
                     if isinstance(data, list) and len(data) >= 2:
-                        # data[0] is the current or most recent candle, data[1] is the previous completed candle
                         return (ticker, data[1]['close'])
+                
+                # Fallback: if from_date was specified but failed to return enough candles, try without it
+                if from_date:
+                    response = requests.get(url, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if isinstance(data, list) and len(data) >= 2:
+                            return (ticker, data[1]['close'])
             except Exception:
                 pass
             return None
             
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(fetch_single, t) for t in tickers]
-            for future in concurrent.futures.as_completed(futures):
-                res = future.result()
-                if res:
-                    closes[res[0]] = res[1]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+            results = executor.map(fetch_single, tickers)
+            closes = {res[0]: res[1] for res in results if res}
+                    
+        return closes
+
+    def fetch_1min_closes(self, tickers: list, from_date: str = "", extended: bool = False) -> dict:
+        closes = {}
+        if not tickers:
+            return closes
+            
+        import concurrent.futures
+        
+        def fetch_single(ticker):
+            url = f"{self.base_url}/historical-chart/1min?symbol={ticker}&apikey={self.api_key}"
+            if extended:
+                url += "&extended=true"
+            
+            url_with_from = url
+            if from_date:
+                url_with_from += f"&from={from_date}"
+                
+            try:
+                response = requests.get(url_with_from, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    if isinstance(data, list) and len(data) >= 2:
+                        return (ticker, data[1]['close'])
+                
+                # Fallback: if from_date was specified but failed to return enough candles, try without it
+                if from_date:
+                    response = requests.get(url, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if isinstance(data, list) and len(data) >= 2:
+                            return (ticker, data[1]['close'])
+            except Exception:
+                pass
+            return None
+            
+        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+            results = executor.map(fetch_single, tickers)
+            closes = {res[0]: res[1] for res in results if res}
                     
         return closes
 
@@ -307,5 +350,8 @@ def get_realtime_quotes(api_key: str, tickers: list) -> list:
 def get_floats(api_key: str, tickers: list) -> dict:
     return FMPProvider(api_key).fetch_floats(tickers)
 
-def get_realtime_5min_closes(api_key: str, tickers: list) -> dict:
-    return FMPProvider(api_key).fetch_5min_closes(tickers)
+def get_realtime_5min_closes(api_key: str, tickers: list, from_date: str = "", extended: bool = False) -> dict:
+    return FMPProvider(api_key).fetch_5min_closes(tickers, from_date, extended)
+
+def get_realtime_1min_closes(api_key: str, tickers: list, from_date: str = "", extended: bool = False) -> dict:
+    return FMPProvider(api_key).fetch_1min_closes(tickers, from_date, extended)
