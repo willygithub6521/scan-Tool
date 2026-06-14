@@ -294,6 +294,18 @@ def render_page():
     
     st.sidebar.markdown("---")
     strict_filter = st.sidebar.checkbox("僅顯示達標標的 (過濾未達標)", value=True)
+    enable_notifications = st.sidebar.checkbox("🔔 啟用瀏覽器桌面通知與音效", value=False, key="enable_notifications")
+    
+    if enable_notifications:
+        import streamlit.components.v1 as components
+        js_permission = """
+        <script>
+        if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+            Notification.requestPermission();
+        }
+        </script>
+        """
+        components.html(js_permission, height=0, width=0)
 
     # 3. Data Loading (From Cache or Initial Fetch)
     data_cache = RTS_STATE["data"]
@@ -420,6 +432,57 @@ def render_page():
         
     df_results = pd.DataFrame(results)
     
+    # --- Real-time Notification System ---
+    current_passed = {r["Ticker"] for r in results if r["_is_passed"]}
+    if "passed_tickers" not in st.session_state:
+        st.session_state["passed_tickers"] = current_passed
+        newly_passed = set()
+    else:
+        newly_passed = current_passed - st.session_state["passed_tickers"]
+        st.session_state["passed_tickers"] = current_passed
+        
+    if enable_notifications and newly_passed:
+        import streamlit.components.v1 as components
+        tickers_str = ", ".join(sorted(newly_passed))
+        js_code = f"""
+        <script>
+        function triggerAlert() {{
+            // 1. Play Web Audio API double-beep (works robustly in background tabs without external files)
+            try {{
+                var context = new (window.AudioContext || window.webkitAudioContext)();
+                function playBeep(delay, frequency, duration) {{
+                    var osc = context.createOscillator();
+                    var gain = context.createGain();
+                    osc.connect(gain);
+                    gain.connect(context.destination);
+                    osc.type = "sine";
+                    osc.frequency.value = frequency;
+                    gain.gain.setValueAtTime(0.2, context.currentTime + delay);
+                    gain.gain.exponentialRampToValueAtTime(0.01, context.currentTime + delay + duration);
+                    osc.start(context.currentTime + delay);
+                    osc.stop(context.currentTime + delay + duration);
+                }}
+                playBeep(0, 880, 0.15);
+                playBeep(0.2, 880, 0.15);
+            }} catch(e) {{
+                console.log("Audio play error: " + e);
+            }}
+            
+            // 2. Desktop notification
+            if ("Notification" in window) {{
+                if (Notification.permission === "granted") {{
+                    new Notification("⚡ Screener 達標通知", {{
+                        body: "股票 {tickers_str} 滿足您設定的篩選條件！",
+                        icon: "https://cdn-icons-png.flaticon.com/512/179/179386.png"
+                    }});
+                }}
+            }}
+        }}
+        triggerAlert();
+        </script>
+        """
+        components.html(js_code, height=0, width=0)
+        
     if strict_filter and not df_results.empty:
         df_results = df_results[df_results["_is_passed"]]
         
