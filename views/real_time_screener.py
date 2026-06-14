@@ -257,15 +257,37 @@ def render_page():
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("數值篩選條件")
-    min_gap = st.sidebar.number_input("Gap 跳空大於 (%)", value=0.0, step=1.0)
-    min_gainer = st.sidebar.number_input("Gainer 漲幅大於 (%)", value=5.0, step=1.0)
-    min_intraday = st.sidebar.number_input("開盤到目前漲幅大於 (%)", value=0.0, step=1.0)
-    min_interval_pct = st.sidebar.number_input(f"最近{resolved_interval_ui}漲幅大於 (%)", value=0.0, step=1.0)
     
+    col_gap_lbl, col_gap_chk = st.sidebar.columns([3, 1])
+    col_gap_lbl.write("Gap 跳空大於 (%)")
+    filter_gap = col_gap_chk.checkbox("篩選", value=True, key="filter_gap")
+    min_gap = st.sidebar.number_input("Gap 跳空大於 (%)", value=0.0, step=1.0, label_visibility="collapsed")
+
+    col_gain_lbl, col_gain_chk = st.sidebar.columns([3, 1])
+    col_gain_lbl.write("Gainer 漲幅大於 (%)")
+    filter_gainer = col_gain_chk.checkbox("篩選", value=True, key="filter_gainer")
+    min_gainer = st.sidebar.number_input("Gainer 漲幅大於 (%)", value=5.0, step=1.0, label_visibility="collapsed")
+
+    col_intra_lbl, col_intra_chk = st.sidebar.columns([3, 1])
+    col_intra_lbl.write("開盤到目前漲幅大於 (%)")
+    filter_intraday = col_intra_chk.checkbox("篩選", value=True, key="filter_intraday")
+    min_intraday = st.sidebar.number_input("開盤到目前漲幅大於 (%)", value=0.0, step=1.0, label_visibility="collapsed")
+
+    col_intv_lbl, col_intv_chk = st.sidebar.columns([3, 1])
+    col_intv_lbl.write(f"最近{resolved_interval_ui}漲幅大於 (%)")
+    filter_interval = col_intv_chk.checkbox("篩選", value=True, key="filter_interval")
+    min_interval_pct = st.sidebar.number_input(f"最近{resolved_interval_ui}漲幅大於 (%)", value=0.0, step=1.0, label_visibility="collapsed")
+    
+    col_mc_lbl, col_mc_chk = st.sidebar.columns([3, 1])
+    col_mc_lbl.write("市值 (M)")
+    filter_mc = col_mc_chk.checkbox("篩選", value=True, key="filter_mc")
     col_mc1, col_mc2 = st.sidebar.columns(2)
     min_mc_m = col_mc1.number_input("最低市值 (M)", value=0.0, step=10.0)
     max_mc_m = col_mc2.number_input("最高市值 (M)", value=5000.0, step=100.0)
     
+    col_fl_lbl, col_fl_chk = st.sidebar.columns([3, 1])
+    col_fl_lbl.write("Float (M)")
+    filter_float = col_fl_chk.checkbox("篩選", value=True, key="filter_float")
     col_fl1, col_fl2 = st.sidebar.columns(2)
     min_float_m = col_fl1.number_input("最低 Float (M)", value=0.0, step=1.0)
     max_float_m = col_fl2.number_input("最高 Float (M)", value=500.0, step=10.0)
@@ -364,21 +386,23 @@ def render_page():
         recent_candle_pct = ((price / prev_candle_close - 1) * 100) if prev_candle_close and prev_candle_close > 0 else 0
         
         # Check conditions
-        cond_gap = gap_pct >= min_gap
-        cond_gainer = changes_pct >= min_gainer
-        cond_intraday = intraday_pct >= min_intraday
-        cond_5min = recent_candle_pct >= min_interval_pct
+        cond_gap = (gap_pct >= min_gap) if filter_gap else True
+        cond_gainer = (changes_pct >= min_gainer) if filter_gainer else True
+        cond_intraday = (intraday_pct >= min_intraday) if filter_intraday else True
+        cond_5min = (recent_candle_pct >= min_interval_pct) if filter_interval else True
         
         # Market Cap bounds
         cond_mc = True
-        if min_mc_m > 0: cond_mc = cond_mc and (mc_m >= min_mc_m)
-        if max_mc_m > 0: cond_mc = cond_mc and (mc_m <= max_mc_m)
+        if filter_mc:
+            if min_mc_m > 0: cond_mc = cond_mc and (mc_m >= min_mc_m)
+            if max_mc_m > 0: cond_mc = cond_mc and (mc_m <= max_mc_m)
         
         # Float bounds
         cond_float = True
-        if min_float_m > 0: cond_float = cond_float and (float_m >= min_float_m)
-        if max_float_m > 0: cond_float = cond_float and (float_m <= max_float_m)
-        
+        if filter_float:
+            if min_float_m > 0: cond_float = cond_float and (float_m >= min_float_m)
+            if max_float_m > 0: cond_float = cond_float and (float_m <= max_float_m)
+            
         is_passed = cond_gap and cond_gainer and cond_intraday and cond_5min and cond_mc and cond_float
         
         results.append({
