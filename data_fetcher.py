@@ -242,7 +242,8 @@ class FMPProvider(DataProvider):
                 if response.status_code == 200:
                     data = response.json()
                     if isinstance(data, list) and len(data) >= 2:
-                        return (ticker, data[1]['close'])
+                        closes_list = [c['close'] for c in data[1:11]]
+                        return (ticker, closes_list)
                 
                 # Fallback: if from_date was specified but failed to return enough candles, try without it
                 if from_date:
@@ -250,7 +251,8 @@ class FMPProvider(DataProvider):
                     if response.status_code == 200:
                         data = response.json()
                         if isinstance(data, list) and len(data) >= 2:
-                            return (ticker, data[1]['close'])
+                            closes_list = [c['close'] for c in data[1:11]]
+                            return (ticker, closes_list)
             except Exception:
                 pass
             return None
@@ -282,7 +284,8 @@ class FMPProvider(DataProvider):
                 if response.status_code == 200:
                     data = response.json()
                     if isinstance(data, list) and len(data) >= 2:
-                        return (ticker, data[1]['close'])
+                        closes_list = [c['close'] for c in data[1:11]]
+                        return (ticker, closes_list)
                 
                 # Fallback: if from_date was specified but failed to return enough candles, try without it
                 if from_date:
@@ -290,7 +293,8 @@ class FMPProvider(DataProvider):
                     if response.status_code == 200:
                         data = response.json()
                         if isinstance(data, list) and len(data) >= 2:
-                            return (ticker, data[1]['close'])
+                            closes_list = [c['close'] for c in data[1:11]]
+                            return (ticker, closes_list)
             except Exception:
                 pass
             return None

@@ -1,4 +1,3 @@
-from pandas.io.formats import console
 import streamlit as st
 import pandas as pd
 from streamlit_autorefresh import st_autorefresh
@@ -12,7 +11,7 @@ from data_fetcher import (
     get_realtime_1min_closes
 )
 
-# --- Global State for Background Thread ---
+# --- Global State for Background Thread & Watchlist ---
 @st.cache_resource
 def get_global_rts_state():
     return {
@@ -27,6 +26,7 @@ def get_global_rts_state():
             "resolved_interval": "5min",
             "fetch_time": None
         },
+        "watchlist": {},  # Persistently tracks triggered pullback stocks
         "is_fetching": False,
         "has_prefetched": False,
         "thread": None,
@@ -34,7 +34,8 @@ def get_global_rts_state():
             "interval": "Auto (根據更新頻率)",
             "today_only": True,
             "extended": True,
-            "auto_refresh_mins": 5
+            "auto_refresh_mins": 5,
+            "watchlist_expiry_mins": 15
         }
     }
 
@@ -101,7 +102,7 @@ def start_background_thread(state):
                                     
                                 extended = settings.get("extended", True)
                                 
-                                # 3. Fetch closes
+                                # 3. Fetch closes list (returns last 10 closes)
                                 if resolved_interval == "1min":
                                     closes_data = get_realtime_1min_closes(api_key, tickers, from_date=from_date, extended=extended)
                                 else:
@@ -156,7 +157,7 @@ def render_page():
     
     # Auto-refresh setup
     col_ref1, col_ref2 = st.sidebar.columns([2, 1])
-    auto_refresh_mins = col_ref1.number_input("自動更新頻率 (分鐘)", value=5, min_value=1, step=1)
+    auto_refresh_mins = col_ref1.number_input("自動更新頻率 (分鐘)", value=5, min_value=1, step=1, key="auto_refresh_mins")
     
     if "rts_refresh_count" not in st.session_state:
         st.session_state["rts_refresh_count"] = 0
@@ -167,17 +168,20 @@ def render_page():
         intraday_interval = st.selectbox(
             "收盤價分鐘級距",
             options=["Auto (根據更新頻率)", "1min", "5min"],
-            index=0
+            index=0,
+            key="intraday_interval"
         )
-        today_only = st.checkbox("僅限今日數據 (減小傳輸)", value=True)
-        extended_hours = st.checkbox("包含盤前/盤後數據 (Extended)", value=True)
+        today_only = st.checkbox("僅限今日數據 (減小傳輸)", value=True, key="today_only")
+        extended_hours = st.checkbox("包含盤前/盤後數據 (Extended)", value=True, key="extended_hours")
+        watchlist_expiry_mins = st.number_input("觀察池保留時間 (分鐘)", value=15, min_value=1, max_value=120, step=1, key="watchlist_expiry_mins")
 
     # Sync settings into the global RTS_STATE so background thread can access them
     RTS_STATE["settings"] = {
         "interval": intraday_interval,
         "today_only": today_only,
         "extended": extended_hours,
-        "auto_refresh_mins": auto_refresh_mins
+        "auto_refresh_mins": auto_refresh_mins,
+        "watchlist_expiry_mins": watchlist_expiry_mins
     }
 
     # Resolve actual interval for UI and instant fetching
@@ -195,13 +199,11 @@ def render_page():
         st.session_state["rts_refresh_count"] += 1
         st.session_state["last_autorefresh_count"] = -1
         RTS_STATE["next_refresh_time"] = time.time() + auto_refresh_mins * 60
-        st.rerun()
 
     if col_ref2.button("🔄 手動更新"):
         # Force a new fetch
         with st.spinner("正在獲取最新 Top Gainers 資料..."):
             gainers = get_realtime_biggest_gainers(fmp_api_key)
-            # print(f'Gainers: {gainers}')
             
         if gainers:
             tickers = [item['symbol'] for item in gainers if 'symbol' in item]
@@ -241,7 +243,6 @@ def render_page():
         st.session_state["rts_refresh_count"] += 1
         st.session_state["last_autorefresh_count"] = -1 # Reset so next autorefresh triggers update
         RTS_STATE["next_refresh_time"] = time.time() + auto_refresh_mins * 60
-        st.rerun()
 
     # Apply autorefresh (uses the refresh count as key so it resets on manual refresh)
     refresh_count = st_autorefresh(interval=auto_refresh_mins * 60 * 1000, key=f"rts_autorefresh_{st.session_state['rts_refresh_count']}")
@@ -261,39 +262,39 @@ def render_page():
     col_gap_lbl, col_gap_chk = st.sidebar.columns([3, 1])
     col_gap_lbl.write("Gap 跳空大於 (%)")
     filter_gap = col_gap_chk.checkbox("篩選", value=True, key="filter_gap")
-    min_gap = st.sidebar.number_input("Gap 跳空大於 (%)", value=0.0, step=1.0, label_visibility="collapsed")
+    min_gap = st.sidebar.number_input("Gap 跳空大於 (%)", value=0.0, step=1.0, label_visibility="collapsed", key="min_gap_val")
 
     col_gain_lbl, col_gain_chk = st.sidebar.columns([3, 1])
     col_gain_lbl.write("Gainer 漲幅大於 (%)")
     filter_gainer = col_gain_chk.checkbox("篩選", value=True, key="filter_gainer")
-    min_gainer = st.sidebar.number_input("Gainer 漲幅大於 (%)", value=5.0, step=1.0, label_visibility="collapsed")
+    min_gainer = st.sidebar.number_input("Gainer 漲幅大於 (%)", value=5.0, step=1.0, label_visibility="collapsed", key="min_gainer_val")
 
     col_intra_lbl, col_intra_chk = st.sidebar.columns([3, 1])
     col_intra_lbl.write("開盤到目前漲幅大於 (%)")
     filter_intraday = col_intra_chk.checkbox("篩選", value=True, key="filter_intraday")
-    min_intraday = st.sidebar.number_input("開盤到目前漲幅大於 (%)", value=0.0, step=1.0, label_visibility="collapsed")
+    min_intraday = st.sidebar.number_input("開盤到目前漲幅大於 (%)", value=0.0, step=1.0, label_visibility="collapsed", key="min_intraday_val")
 
     col_intv_lbl, col_intv_chk = st.sidebar.columns([3, 1])
-    col_intv_lbl.write(f"最近{resolved_interval_ui}漲幅大於 (%)")
+    col_intv_lbl.write(f"最近{resolved_interval_ui}最大漲幅大於 (%)")
     filter_interval = col_intv_chk.checkbox("篩選", value=True, key="filter_interval")
-    min_interval_pct = st.sidebar.number_input(f"最近{resolved_interval_ui}漲幅大於 (%)", value=0.0, step=1.0, label_visibility="collapsed")
+    min_interval_pct = st.sidebar.number_input(f"最近{resolved_interval_ui}最大漲幅大於 (%)", value=0.0, step=1.0, label_visibility="collapsed", key="min_interval_pct_val")
     
     col_mc_lbl, col_mc_chk = st.sidebar.columns([3, 1])
     col_mc_lbl.write("市值 (M)")
     filter_mc = col_mc_chk.checkbox("篩選", value=True, key="filter_mc")
     col_mc1, col_mc2 = st.sidebar.columns(2)
-    min_mc_m = col_mc1.number_input("最低市值 (M)", value=0.0, step=10.0)
-    max_mc_m = col_mc2.number_input("最高市值 (M)", value=5000.0, step=100.0)
+    min_mc_m = col_mc1.number_input("最低市值 (M)", value=0.0, step=10.0, key="min_mc_m_val")
+    max_mc_m = col_mc2.number_input("最高市值 (M)", value=5000.0, step=100.0, key="max_mc_m_val")
     
     col_fl_lbl, col_fl_chk = st.sidebar.columns([3, 1])
     col_fl_lbl.write("Float (M)")
     filter_float = col_fl_chk.checkbox("篩選", value=True, key="filter_float")
     col_fl1, col_fl2 = st.sidebar.columns(2)
-    min_float_m = col_fl1.number_input("最低 Float (M)", value=0.0, step=1.0)
-    max_float_m = col_fl2.number_input("最高 Float (M)", value=500.0, step=10.0)
+    min_float_m = col_fl1.number_input("最低 Float (M)", value=0.0, step=1.0, key="min_float_m_val")
+    max_float_m = col_fl2.number_input("最高 Float (M)", value=500.0, step=10.0, key="max_float_m_val")
     
     st.sidebar.markdown("---")
-    strict_filter = st.sidebar.checkbox("僅顯示達標標的 (過濾未達標)", value=True)
+    strict_filter = st.sidebar.checkbox("僅顯示達標標的 (過濾未達標)", value=True, key="strict_filter_val")
     enable_notifications = st.sidebar.checkbox("🔔 啟用瀏覽器桌面通知與音效", value=False, key="enable_notifications")
     
     if enable_notifications:
@@ -368,10 +369,10 @@ def render_page():
     
     if resolved_interval == "1min":
         closes_dict = data_cache.get("closes_1min") or {}
-        pct_col_name = "最近1分鐘漲幅 (%)"
+        pct_col_name = f"最近1分鐘最大漲幅 (%)"
     else:
         closes_dict = data_cache.get("closes_5min") or {}
-        pct_col_name = "最近5分鐘漲幅 (%)"
+        pct_col_name = f"最近5分鐘最大漲幅 (%)"
     
     # 4. Process and Filter (Instantaneous, using cached data)
     results = []
@@ -394,8 +395,13 @@ def render_page():
         float_shares = floats_dict.get(ticker, 0)
         float_m = float_shares / 1e6 if float_shares else 0
         
-        prev_candle_close = closes_dict.get(ticker, 0)
-        recent_candle_pct = ((price / prev_candle_close - 1) * 100) if prev_candle_close and prev_candle_close > 0 else 0
+        # Suggestion 3: Fetch minimum close in last 10 candles, compute max return
+        prev_candle_closes = closes_dict.get(ticker, [])
+        if prev_candle_closes:
+            min_close = min(prev_candle_closes)
+            recent_candle_pct = ((price / min_close - 1) * 100)
+        else:
+            recent_candle_pct = 0.0
         
         # Check conditions
         cond_gap = (gap_pct >= min_gap) if filter_gap else True
@@ -423,17 +429,26 @@ def render_page():
             "Gap (%)": round(gap_pct, 2),
             "Gainer (%)": round(changes_pct, 2),
             "開盤到目前漲幅 (%)": round(intraday_pct, 2),
-            pct_col_name: round(recent_candle_pct, 2) if prev_candle_close > 0 else 0.0,
-            "Market Cap (M)": round(mc_m, 2) if mc_m > 0 else "N/A",
-            "Float (M)": round(float_m, 2) if float_m > 0 else "N/A",
+            pct_col_name: round(recent_candle_pct, 2) if prev_candle_closes else 0.0,
+            "Market Cap (M)": round(mc_m, 2) if mc_m > 0 else None,
+            "Float (M)": round(float_m, 2) if float_m > 0 else None,
             "達標 Signal": "✅" if is_passed else "❌",
-            "_is_passed": is_passed
+            "_is_passed": is_passed,
+            "_recent_candle_pct": recent_candle_pct
         })
         
     df_results = pd.DataFrame(results)
     
-    # --- Real-time Notification System ---
+    # DEBUG Console output to verify filtering logic
+    print(f"\n[DEBUG] min_interval_pct={min_interval_pct}, filter_interval={filter_interval}, strict_filter={strict_filter}", flush=True)
+    for r in results:
+        if r["_is_passed"]:
+            print(f"  [DEBUG] Passed: {r['Ticker']}, Max Return: {r.get(pct_col_name)}%", flush=True)
+    
+    # --- Real-time Notification & Watchlist System ---
     current_passed = {r["Ticker"] for r in results if r["_is_passed"]}
+    
+    # Initialize session state cache if not present
     if "passed_tickers" not in st.session_state:
         st.session_state["passed_tickers"] = current_passed
         newly_passed = set()
@@ -441,6 +456,49 @@ def render_page():
         newly_passed = current_passed - st.session_state["passed_tickers"]
         st.session_state["passed_tickers"] = current_passed
         
+    # Maintain global Watchlist state (Suggestion 1)
+    now = pd.Timestamp.now()
+    watchlist = RTS_STATE.get("watchlist", {})
+    
+    # 1. Add/Update newly triggered tickers in watchlist
+    for r in results:
+        ticker = r["Ticker"]
+        price = r["Price"]
+        if r["_is_passed"]:
+            if ticker not in watchlist:
+                watchlist[ticker] = {
+                    "trigger_time": now,
+                    "trigger_price": price,
+                    "trigger_pct": r["_recent_candle_pct"],
+                    "max_price_since_trigger": price
+                }
+            else:
+                watchlist[ticker]["max_price_since_trigger"] = max(
+                    watchlist[ticker]["max_price_since_trigger"],
+                    price
+                )
+        elif ticker in watchlist:
+            # If still in watchlist but no longer passed current filters, update its max price if current price is higher
+            watchlist[ticker]["max_price_since_trigger"] = max(
+                watchlist[ticker]["max_price_since_trigger"],
+                price
+            )
+            
+    # 2. Expiry checks
+    expiry_secs = watchlist_expiry_mins * 60
+    expired_tickers = []
+    for ticker, info in watchlist.items():
+        elapsed_secs = (now - info["trigger_time"]).total_seconds()
+        if elapsed_secs > expiry_secs:
+            expired_tickers.append(ticker)
+            
+    for ticker in expired_tickers:
+        if ticker in watchlist:
+            del watchlist[ticker]
+            
+    RTS_STATE["watchlist"] = watchlist
+        
+    # Trigger audio & desktop alerts for new tickers
     if enable_notifications and newly_passed:
         import streamlit.components.v1 as components
         tickers_str = ", ".join(sorted(newly_passed))
@@ -483,6 +541,8 @@ def render_page():
         """
         components.html(js_code, height=0, width=0)
         
+    # Render Radar Table
+    st.subheader("📡 即時雷達 (Real-time Radar)")
     if strict_filter and not df_results.empty:
         df_results = df_results[df_results["_is_passed"]]
         
@@ -494,10 +554,59 @@ def render_page():
                 return f'color: {color}'
             return ''
             
-        styled_df = df_results.style.map(color_returns, subset=["Gap (%)", "Gainer (%)", "開盤到目前漲幅 (%)", pct_col_name])
-        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        styled_df = df_results.style.format(na_rep="N/A").map(color_returns, subset=["Gap (%)", "Gainer (%)", "開盤到目前漲幅 (%)", pct_col_name])
+        st.dataframe(styled_df, width="stretch", hide_index=True)
     else:
         st.warning("目前沒有任何股票符合您的即時篩選條件。")
+
+    # Render Watchlist Table (Suggestion 1: Active Pullback Watchlist)
+    st.markdown("---")
+    
+    col_wl_title, col_wl_btn = st.columns([5, 1])
+    col_wl_title.subheader(f"📈 達標活躍觀察池 (Active Pullback Watchlist - 保留 {watchlist_expiry_mins} 分鐘)")
+    if col_wl_btn.button("🗑️ 清空觀察池", key="clear_watchlist_btn", use_container_width=True):
+        RTS_STATE["watchlist"] = {}
+        st.toast("觀察池已清空！", icon="🧹")
+        st.rerun()
+    
+    if watchlist:
+        watchlist_rows = []
+        for ticker, info in watchlist.items():
+            # Get latest price from quotes_dict
+            quote = quotes_dict.get(ticker, {})
+            current_price = quote.get('price', info["trigger_price"])
+            
+            # Update max price in session display
+            max_price = max(info["max_price_since_trigger"], current_price)
+            pullback_pct = ((current_price / max_price - 1) * 100) if max_price > 0 else 0.0
+            
+            elapsed_secs = (now - info["trigger_time"]).total_seconds()
+            elapsed_mins = int(elapsed_secs // 60)
+            elapsed_secs_remain = int(elapsed_secs % 60)
+            elapsed_str = f"{elapsed_mins}分{elapsed_secs_remain}秒前"
+            
+            watchlist_rows.append({
+                "Ticker": ticker,
+                "觸發時間": info["trigger_time"].strftime("%H:%M:%S"),
+                "已追蹤時間": elapsed_str,
+                "觸發價格": round(info["trigger_price"], 2),
+                "觸發%": round(info.get("trigger_pct", 0.0), 2),
+                "回檔%": round(pullback_pct, 2)
+            })
+            
+        df_watchlist = pd.DataFrame(watchlist_rows)
+        
+        def color_pullback(val):
+            if isinstance(val, (int, float)):
+                # Pullbacks are negative or 0. Red represents pullback severity.
+                color = 'red' if val < 0 else 'white'
+                return f'color: {color}'
+            return ''
+            
+        styled_watchlist = df_watchlist.style.map(color_pullback, subset=["回檔%"])
+        st.dataframe(styled_watchlist, width="stretch", hide_index=True)
+    else:
+        st.info("目前觀察池內無達標標的。當有股票滿足篩選條件時，會自動加入此處供您追蹤 Pullback 買點。")
 
 if __name__ == "__main__":
     render_page()
