@@ -1,8 +1,52 @@
 import yfinance as yf
 import pandas as pd
-import streamlit as st
 import requests
 from abc import ABC, abstractmethod
+import functools
+
+def log_error(msg: str):
+    try:
+        from streamlit.runtime import exists as st_exists
+        if st_exists():
+            import streamlit as st
+            st.error(msg)
+            return
+    except Exception:
+        pass
+    print(f"[ERROR] {msg}", flush=True)
+
+def safe_cache_data(ttl=None, show_spinner=False):
+    try:
+        from streamlit.runtime import exists as st_exists
+        if st_exists():
+            import streamlit as st
+            return st.cache_data(ttl=ttl, show_spinner=show_spinner)
+    except Exception:
+        pass
+        
+    def decorator(func):
+        cache = {}
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            def make_hashable(val):
+                if isinstance(val, dict):
+                    return tuple(sorted((k, make_hashable(v)) for k, v in val.items()))
+                elif isinstance(val, list):
+                    return tuple(make_hashable(v) for v in val)
+                elif isinstance(val, set):
+                    return tuple(sorted(make_hashable(v) for v in val))
+                return val
+            
+            hashable_args = tuple(make_hashable(arg) for arg in args)
+            hashable_kwargs = tuple(sorted((k, make_hashable(v)) for k, v in kwargs.items()))
+            key = (hashable_args, hashable_kwargs)
+            if key in cache:
+                return cache[key]
+            result = func(*args, **kwargs)
+            cache[key] = result
+            return result
+        return wrapper
+    return decorator
 
 class DataProvider(ABC):
     @abstractmethod
@@ -26,7 +70,7 @@ class YFinanceProvider(DataProvider):
                 df.index = df.index.tz_localize(None)
             return df
         except Exception as e:
-            st.error(f"Error fetching data from YFinance for {ticker}: {e}")
+            log_error(f"Error fetching data from YFinance for {ticker}: {e}")
             return pd.DataFrame()
 
     def fetch_basic_info(self, ticker: str) -> dict:
@@ -74,7 +118,7 @@ class FMPProvider(DataProvider):
             }, inplace=True)
             return df
         except Exception as e:
-            st.error(f"Error fetching data from FMP for {ticker}: {e}")
+            log_error(f"Error fetching data from FMP for {ticker}: {e}")
             return pd.DataFrame()
 
     def fetch_basic_info(self, ticker: str) -> dict:
@@ -130,7 +174,7 @@ class FMPProvider(DataProvider):
             keep_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume'] if c in df.columns]
             return df[keep_cols]
         except Exception as e:
-            st.error(f"Error fetching intraday data from FMP for {ticker}: {e}")
+            log_error(f"Error fetching intraday data from FMP for {ticker}: {e}")
             return pd.DataFrame()
 
     def fetch_news(self, ticker: str, limit: int = 3) -> list:
@@ -153,7 +197,7 @@ class FMPProvider(DataProvider):
             if isinstance(data, list):
                 return [{"symbol": item["symbol"], "companyName": item.get("companyName", item.get("symbol")), "sector": item.get("sector", "N/A"), "marketCap": item.get("marketCap", "N/A")} for item in data if "symbol" in item]
         except Exception as e:
-            st.error(f"Error fetching from FMP Screener: {e}")
+            log_error(f"Error fetching from FMP Screener: {e}")
         return []
 
     def fetch_biggest_gainers(self) -> list:
@@ -164,7 +208,7 @@ class FMPProvider(DataProvider):
             if isinstance(data, list):
                 return data
         except Exception as e:
-            st.error(f"Error fetching biggest gainers from FMP: {e}")
+            log_error(f"Error fetching biggest gainers from FMP: {e}")
         return []
 
     def fetch_quotes(self, tickers: list) -> list:
@@ -184,9 +228,9 @@ class FMPProvider(DataProvider):
                     if isinstance(data, list):
                         results.extend(data)
                 else:
-                    st.error(f"FMP Batch Quote API Error ({response.status_code}): {response.text}")
+                    log_error(f"FMP Batch Quote API Error ({response.status_code}): {response.text}")
             except Exception as e:
-                st.error(f"Error fetching batch quotes: {e}")
+                log_error(f"Error fetching batch quotes: {e}")
         return results
 
     def fetch_floats(self, tickers: list) -> dict:
@@ -305,7 +349,7 @@ class FMPProvider(DataProvider):
                     
         return closes
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@safe_cache_data(ttl=3600, show_spinner=False)
 def get_historical_data(ticker: str, provider_name: str, period: str, api_key: str = "") -> pd.DataFrame:
     if provider_name == "FMP":
         provider = FMPProvider(api_key)
@@ -313,7 +357,7 @@ def get_historical_data(ticker: str, provider_name: str, period: str, api_key: s
         provider = YFinanceProvider()
     return provider.fetch_historical_data(ticker, period)
 
-@st.cache_data(ttl=86400, show_spinner=False)
+@safe_cache_data(ttl=86400, show_spinner=False)
 def get_basic_info(ticker: str, provider_name: str, api_key: str = "") -> dict:
     if provider_name == "FMP":
         provider = FMPProvider(api_key)
@@ -321,24 +365,24 @@ def get_basic_info(ticker: str, provider_name: str, api_key: str = "") -> dict:
         provider = YFinanceProvider()
     return provider.fetch_basic_info(ticker)
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@safe_cache_data(ttl=3600, show_spinner=False)
 def get_fmp_screener_tickers(api_key: str, params: dict) -> list:
     provider = FMPProvider(api_key)
     return provider.fetch_screener_tickers(params)
 
-@st.cache_data(ttl=600, show_spinner=False)
+@safe_cache_data(ttl=600, show_spinner=False)
 def get_aftermarket_quote(ticker: str, provider_name: str, api_key: str = "") -> dict:
     if provider_name == "FMP":
         return FMPProvider(api_key).fetch_aftermarket_quote(ticker)
     return {}
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@safe_cache_data(ttl=1800, show_spinner=False)
 def get_stock_news(ticker: str, provider_name: str, api_key: str = "", limit: int = 3) -> list:
     if provider_name == "FMP":
         return FMPProvider(api_key).fetch_news(ticker, limit)
     return []
 
-@st.cache_data(ttl=600, show_spinner=False)
+@safe_cache_data(ttl=600, show_spinner=False)
 def get_intraday_data(ticker: str, interval: str, from_date: str, to_date: str, api_key: str = "") -> pd.DataFrame:
     """取得 FMP 分鐘線資料快取版 (TTL=10min)，僅支援 FMP Starter Plan 以上"""
     return FMPProvider(api_key).fetch_intraday_data(ticker, interval, from_date, to_date)
@@ -350,7 +394,7 @@ def get_realtime_biggest_gainers(api_key: str) -> list:
 def get_realtime_quotes(api_key: str, tickers: list) -> list:
     return FMPProvider(api_key).fetch_quotes(tickers)
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@safe_cache_data(ttl=3600, show_spinner=False)
 def get_floats(api_key: str, tickers: list) -> dict:
     return FMPProvider(api_key).fetch_floats(tickers)
 
