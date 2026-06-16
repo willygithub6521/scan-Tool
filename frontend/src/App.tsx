@@ -102,9 +102,11 @@ function App() {
         )}
         {(activeTab === 'vector_bt' || activeTab === 'backtrader') && (
           <Backtesters 
+            key={activeTab}
             apiKey={apiKey} 
             scannedTickers={scannedTickers} 
             BASE_URL={BASE_URL} 
+            initialTab={activeTab === 'vector_bt' ? 'vector' : 'backtrader'}
           />
         )}
       </main>

@@ -15,6 +15,7 @@ interface BacktestersProps {
   apiKey: string;
   scannedTickers: string[];
   BASE_URL: string;
+  initialTab?: 'vector' | 'backtrader';
 }
 
 // Sub-component for rendering line chart equity curve using lightweight-charts
@@ -107,8 +108,8 @@ const EquityCurveChart: React.FC<{ data: any[]; showBnh?: boolean }> = ({ data, 
   );
 };
 
-export const Backtesters: React.FC<BacktestersProps> = ({ apiKey, scannedTickers, BASE_URL }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'vector' | 'backtrader'>('vector');
+export const Backtesters: React.FC<BacktestersProps> = ({ apiKey, scannedTickers, BASE_URL, initialTab }) => {
+  const [activeSubTab, setActiveSubTab] = useState<'vector' | 'backtrader'>(initialTab || 'vector');
 
   // Common UI State
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -116,6 +117,17 @@ export const Backtesters: React.FC<BacktestersProps> = ({ apiKey, scannedTickers
   const [metrics, setMetrics] = useState<any>(null);
   const [equityData, setEquityData] = useState<any[]>([]);
   const [tradeLogs, setTradeLogs] = useState<any[]>([]);
+
+  // Sync with prop when clicking on sidebar tabs
+  useEffect(() => {
+    if (initialTab) {
+      setActiveSubTab(initialTab);
+      setMetrics(null);
+      setEquityData([]);
+      setTradeLogs([]);
+      setErrorMsg('');
+    }
+  }, [initialTab]);
 
   // Vectorized Lab Configs
   const [vecDataSource, setVecDataSource] = useState<string>('FMP');
