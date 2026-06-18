@@ -189,11 +189,7 @@ export const Backtesters: React.FC<BacktestersProps> = ({ apiKey, scannedTickers
       return;
     }
 
-    if (vecDataSource === 'FMP' && !apiKey) {
-      setErrorMsg('使用 FMP 數據源需配置 FMP API 金鑰！');
-      setIsLoading(false);
-      return;
-    }
+
 
     const payload = {
       tickers,
@@ -244,11 +240,7 @@ export const Backtesters: React.FC<BacktestersProps> = ({ apiKey, scannedTickers
       return;
     }
 
-    if (btDataSource === 'FMP' && !apiKey) {
-      setErrorMsg('大腦引擎使用 FMP 數據源需要提供 FMP API 金鑰！');
-      setIsLoading(false);
-      return;
-    }
+
 
     const payload = {
       tickers,

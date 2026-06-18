@@ -123,12 +123,6 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
       finalTickers = csvTickers;
     }
 
-    if (dataSource === 'FMP' && !apiKey) {
-      setErrorMsg('請先在側邊欄輸入 FMP API Key！');
-      setIsLoading(false);
-      return;
-    }
-
     if (inputMethod !== 'FMP 伺服器端進階篩選' && finalTickers.length === 0) {
       setErrorMsg('請輸入至少一檔股票代碼或上傳 CSV！');
       setIsLoading(false);

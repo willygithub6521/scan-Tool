@@ -96,11 +96,6 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
 
   // Primary data fetching
   const handleFetchRadarData = async (isBackground: boolean = false) => {
-    if (!apiKey) {
-      setErrorMsg('請先在側邊欄配置 FMP API 金鑰！');
-      return;
-    }
-
     if (!isBackground) setIsLoading(true);
     setErrorMsg('');
 
@@ -151,17 +146,13 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
   // Handle auto-refresh interval lifecycle
   useEffect(() => {
     fetchSession();
-    if (apiKey) {
-      handleFetchRadarData();
-    }
+    handleFetchRadarData();
 
     // Set auto-refresh interval
     const intervalTime = autoRefreshMins * 60 * 1000;
     const activeInterval = setInterval(() => {
       fetchSession();
-      if (apiKey) {
-        handleFetchRadarData(true);
-      }
+      handleFetchRadarData(true);
     }, intervalTime);
 
     return () => clearInterval(activeInterval);
