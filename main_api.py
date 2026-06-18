@@ -48,6 +48,14 @@ app.add_middleware(
 # Global in-memory cache for raw historical DataFrames to avoid redundant FMP/Yahoo API requests
 RAW_DATA_CACHE: Dict[str, pd.DataFrame] = {}
 
+# Global in-memory cache for real-time screener to support lightweight updates
+SCREENER_CACHE: Dict[str, Any] = {
+    "cache_key": "",
+    "gainers": [],
+    "floats": {},
+    "closes": {}
+}
+
 def sanitize_value(val):
     """Recursively clean dicts/lists to convert numpy types and replace NaN/Infinity with None"""
     if isinstance(val, dict):
@@ -108,6 +116,7 @@ class RealtimeScreenerRequest(BaseModel):
     max_float_m: float = 500.0
     strict_filter: bool = True
     watchlist: Dict[str, Any] = {}  # Frontend state passed to keep API stateless
+    lightweight: bool = False
 
 class VectorizedBacktestRequest(BaseModel):
     tickers: List[str]
@@ -482,39 +491,75 @@ def post_screener_realtime(req: RealtimeScreenerRequest):
     if not key:
         raise HTTPException(status_code=400, detail="FMP API Key is required for Real-time Screener.")
 
-    # 1. Fetch Top Gainers
-    gainers = get_realtime_biggest_gainers(key)
-    if not gainers:
-        return sanitize_value({"results": [], "watchlist": req.watchlist, "new_notifications": []})
-
-    tickers = [item['symbol'] for item in gainers if 'symbol' in item]
+    global SCREENER_CACHE
     
-    # 2. Parallel fetch quotes & closes
-    quotes = get_realtime_quotes(key, tickers)
-    floats_dict = get_floats(key, tickers)
-
-    # Resolve interval
-    resolved_interval = "5min"
-    if "Auto" in req.intraday_interval:
-        resolved_interval = "1min" if req.auto_refresh_mins < 5 else "5min"
-    elif "1min" in req.intraday_interval:
-        resolved_interval = "1min"
-    else:
-        resolved_interval = "5min"
-
-    from_date = pd.Timestamp.now('US/Eastern').strftime('%Y-%m-%d') if req.today_only else ""
+    # Construct config key to check if query criteria has changed
+    cache_key = f"{req.intraday_interval}_{req.today_only}_{req.extended_hours}_{req.auto_refresh_mins}"
+    
+    use_cache = (
+        req.lightweight 
+        and SCREENER_CACHE["cache_key"] == cache_key 
+        and len(SCREENER_CACHE["gainers"]) > 0
+    )
 
     session = get_market_session_status()
-    if session == "regular":
-        if resolved_interval == "1min":
-            closes_data = get_realtime_1min_closes(key, tickers, from_date=from_date, extended=req.extended_hours)
+
+    if use_cache:
+        # Lightweight path: reuse cached metadata and only fetch latest quotes
+        gainers = SCREENER_CACHE["gainers"]
+        tickers = [item['symbol'] for item in gainers if 'symbol' in item]
+        quotes = get_realtime_quotes(key, tickers)
+        floats_dict = SCREENER_CACHE["floats"]
+        closes_data = SCREENER_CACHE["closes"]
+        
+        # Resolve interval
+        resolved_interval = "5min"
+        if "Auto" in req.intraday_interval:
+            resolved_interval = "1min" if req.auto_refresh_mins < 5 else "5min"
+        elif "1min" in req.intraday_interval:
+            resolved_interval = "1min"
         else:
-            closes_data = get_realtime_5min_closes(key, tickers, from_date=from_date, extended=req.extended_hours)
+            resolved_interval = "5min"
     else:
-        if resolved_interval == "1min":
-            closes_data = get_realtime_1min_closes(key, tickers, from_date=from_date, extended=req.extended_hours)
+        # Full path: fetch everything from scratch
+        gainers = get_realtime_biggest_gainers(key)
+        if not gainers:
+            return sanitize_value({"results": [], "watchlist": req.watchlist, "new_notifications": []})
+
+        tickers = [item['symbol'] for item in gainers if 'symbol' in item]
+        
+        # Parallel fetch quotes & closes
+        quotes = get_realtime_quotes(key, tickers)
+        floats_dict = get_floats(key, tickers)
+
+        # Resolve interval
+        resolved_interval = "5min"
+        if "Auto" in req.intraday_interval:
+            resolved_interval = "1min" if req.auto_refresh_mins < 5 else "5min"
+        elif "1min" in req.intraday_interval:
+            resolved_interval = "1min"
         else:
-            closes_data = get_realtime_5min_closes(key, tickers, from_date=from_date, extended=req.extended_hours)
+            resolved_interval = "5min"
+
+        from_date = pd.Timestamp.now('US/Eastern').strftime('%Y-%m-%d') if req.today_only else ""
+
+        session = get_market_session_status()
+        if session == "regular":
+            if resolved_interval == "1min":
+                closes_data = get_realtime_1min_closes(key, tickers, from_date=from_date, extended=req.extended_hours)
+            else:
+                closes_data = get_realtime_5min_closes(key, tickers, from_date=from_date, extended=req.extended_hours)
+        else:
+            if resolved_interval == "1min":
+                closes_data = get_realtime_1min_closes(key, tickers, from_date=from_date, extended=req.extended_hours)
+            else:
+                closes_data = get_realtime_5min_closes(key, tickers, from_date=from_date, extended=req.extended_hours)
+
+        # Save to global cache
+        SCREENER_CACHE["cache_key"] = cache_key
+        SCREENER_CACHE["gainers"] = gainers
+        SCREENER_CACHE["floats"] = floats_dict
+        SCREENER_CACHE["closes"] = closes_data
 
     quotes_dict = {q['symbol']: q for q in quotes if 'symbol' in q}
 

@@ -21,7 +21,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
   const [estTime, setEstTime] = useState<string>('');
 
   // Auto-refresh config
-  const [autoRefreshMins, setAutoRefreshMins] = useState<number>(5);
+  const [autoRefreshMins, setAutoRefreshMins] = useState<number>(1);
   const [intradayInterval, setIntradayInterval] = useState<string>('Auto (根據更新頻率)');
   const [todayOnly, setTodayOnly] = useState<boolean>(true);
   const [extendedHours, setExtendedHours] = useState<boolean>(true);
@@ -95,7 +95,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
   };
 
   // Primary data fetching
-  const handleFetchRadarData = async (isBackground: boolean = false) => {
+  const handleFetchRadarData = async (isBackground: boolean = false, isLightweight: boolean = false) => {
     if (!isBackground) setIsLoading(true);
     setErrorMsg('');
 
@@ -114,8 +114,9 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
       max_mc_m: maxMktCap,
       min_float_m: minFloat,
       max_float_m: maxFloat,
-      strict_filter: strictFilter,
-      watchlist: watchlistRef.current
+      strict_filter: false, // Force false so backend returns all candidates for local filtering
+      watchlist: watchlistRef.current,
+      lightweight: isLightweight
     };
 
     try {
@@ -143,25 +144,85 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
     }
   }, [enableAlerts]);
 
-  // Handle auto-refresh interval lifecycle
+  // Keep latest handler in ref to prevent stale closure in setInterval
+  const latestFetchRadarData = useRef(handleFetchRadarData);
+  useEffect(() => {
+    latestFetchRadarData.current = handleFetchRadarData;
+  });
+
+  const lastTriggeredMinRef = useRef<number>(-1);
+
+  // Handle auto-refresh interval lifecycle (precision updates on exact 00 seconds)
   useEffect(() => {
     fetchSession();
-    handleFetchRadarData();
+    // Initial fetch (full fetch)
+    latestFetchRadarData.current(false, false);
 
-    // Set auto-refresh interval
-    const intervalTime = autoRefreshMins * 60 * 1000;
+    // Set a 1-second interval to check for the start of each minute
     const activeInterval = setInterval(() => {
-      fetchSession();
-      handleFetchRadarData(true);
-    }, intervalTime);
+      const now = new Date();
+      const currentMin = now.getMinutes();
+      const currentSec = now.getSeconds();
+      
+      // Trigger when seconds is exactly 0 and it matches the autoRefreshMins interval
+      if (currentSec === 0 && (currentMin % autoRefreshMins === 0) && lastTriggeredMinRef.current !== currentMin) {
+        lastTriggeredMinRef.current = currentMin;
+        fetchSession();
+        latestFetchRadarData.current(true, false); // Trigger full background refresh at exact minute mark
+      }
+    }, 1000);
 
     return () => clearInterval(activeInterval);
-  }, [autoRefreshMins, apiKey, intradayInterval, todayOnly, extendedHours, minGap, minGainer, minIntraday, minIntervalPct, minMktCap, maxMktCap, minFloat, maxFloat, strictFilter]);
+  }, [autoRefreshMins, apiKey, intradayInterval, todayOnly, extendedHours, watchlistExpiryMins]);
 
   // Clean watchlist trigger
   const handleClearWatchlist = () => {
     setWatchlist({});
   };
+
+  // Local/Client-side filtering logic
+  const processedResults = results.map(row => {
+    const gapVal = row["Gap (%)"] ?? 0;
+    const gainerVal = row["Gainer (%)"] ?? 0;
+    const intradayVal = row["開盤到目前漲幅 (%)"] ?? 0;
+    
+    // Find the dynamic key for N minutes interval return
+    const intervalKey = Object.keys(row).find(k => k.startsWith("最近") && k.endsWith("最大漲幅 (%)")) || `最近${autoRefreshMins}分鐘最大漲幅 (%)`;
+    const intervalVal = row[intervalKey] ?? 0;
+    
+    const mcVal = row["Market Cap (M)"] ?? 0;
+    const floatVal = row["Float (M)"] ?? 0;
+
+    const condGap = gapVal >= minGap;
+    const condGainer = gainerVal >= minGainer;
+    const condIntraday = intradayVal >= minIntraday;
+    const condInterval = intervalVal >= minIntervalPct;
+
+    let condMc = true;
+    if (minMktCap > 0) condMc = condMc && (mcVal >= minMktCap);
+    if (maxMktCap > 0) condMc = condMc && (mcVal <= maxMktCap);
+
+    let condFloat = true;
+    if (minFloat > 0) condFloat = condFloat && (floatVal >= minFloat);
+    if (maxFloat > 0) condFloat = condFloat && (floatVal <= maxFloat);
+
+    const isPassed = condGap && condGainer && condIntraday && condInterval && condMc && condFloat;
+
+    return {
+      ...row,
+      isLocalPassed: isPassed,
+      // Overwrite static display signal to match local state
+      "達標 Signal": isPassed ? "✅" : "❌",
+      intervalKey
+    };
+  });
+
+  const filteredResults = processedResults.filter(row => {
+    if (strictFilter) {
+      return row.isLocalPassed;
+    }
+    return true;
+  });
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto bg-gray-900 text-gray-100 p-8">
@@ -303,7 +364,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
           </div>
 
           <button
-            onClick={() => handleFetchRadarData()}
+            onClick={() => handleFetchRadarData(false, results.length > 0)}
             disabled={isLoading}
             className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800/40 text-white rounded-xl py-3 px-4 font-semibold text-sm shadow-lg shadow-indigo-600/35 transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
           >
@@ -358,31 +419,42 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-800/80">
-                    {results.map((row, idx) => (
-                      <tr key={idx} className="hover:bg-gray-800/20 transition-colors">
-                        <td className="py-3.5 px-6 font-bold text-white tracking-wide">{row.Ticker}</td>
-                        <td className="py-3.5 px-6 text-right font-semibold text-gray-100">${row.Price}</td>
-                        <td className={`py-3.5 px-6 text-right font-medium ${row["Gap (%)"] >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {row["Gap (%)"] >= 0 ? '+' : ''}{row["Gap (%)"]}%
-                        </td>
-                        <td className={`py-3.5 px-6 text-right font-medium ${row["Gainer (%)"] >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {row["Gainer (%)"] >= 0 ? '+' : ''}{row["Gainer (%)"]}%
-                        </td>
-                        <td className={`py-3.5 px-6 text-right font-medium ${row["開盤到目前漲幅 (%)"] >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {row["開盤到目前漲幅 (%)"] >= 0 ? '+' : ''}{row["開盤到目前漲幅 (%)"]}%
-                        </td>
-                        <td className="py-3.5 px-6 text-right font-medium text-indigo-400">
-                          {row[`最近${autoRefreshMins}分鐘最大漲幅 (%)`]}%
-                        </td>
-                        <td className="py-3.5 px-6 text-right text-gray-400">{row["Market Cap (M)"] ? `${row["Market Cap (M)"]}M` : 'N/A'}</td>
-                        <td className="py-3.5 px-6 text-right text-gray-400">{row["Float (M)"] ? `${row["Float (M)"]}M` : 'N/A'}</td>
-                        <td className="py-3.5 px-6 text-center">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${row["達標 Signal"] === '✅' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
-                            {row["達標 Signal"]}
-                          </span>
+                    {filteredResults.length > 0 ? (
+                      filteredResults.map((row, idx) => {
+                        const intervalKey = row.intervalKey || `最近${autoRefreshMins}分鐘最大漲幅 (%)`;
+                        return (
+                          <tr key={idx} className="hover:bg-gray-800/20 transition-colors">
+                            <td className="py-3.5 px-6 font-bold text-white tracking-wide">{row.Ticker}</td>
+                            <td className="py-3.5 px-6 text-right font-semibold text-gray-100">${row.Price}</td>
+                            <td className={`py-3.5 px-6 text-right font-medium ${row["Gap (%)"] >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {row["Gap (%)"] >= 0 ? '+' : ''}{row["Gap (%)"]}%
+                            </td>
+                            <td className={`py-3.5 px-6 text-right font-medium ${row["Gainer (%)"] >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {row["Gainer (%)"] >= 0 ? '+' : ''}{row["Gainer (%)"]}%
+                            </td>
+                            <td className={`py-3.5 px-6 text-right font-medium ${row["開盤到目前漲幅 (%)"] >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {row["開盤到目前漲幅 (%)"] >= 0 ? '+' : ''}{row["開盤到目前漲幅 (%)"]}%
+                            </td>
+                            <td className="py-3.5 px-6 text-right font-medium text-indigo-400">
+                              {row[intervalKey]}%
+                            </td>
+                            <td className="py-3.5 px-6 text-right text-gray-400">{row["Market Cap (M)"] ? `${row["Market Cap (M)"]}M` : 'N/A'}</td>
+                            <td className="py-3.5 px-6 text-right text-gray-400">{row["Float (M)"] ? `${row["Float (M)"]}M` : 'N/A'}</td>
+                            <td className="py-3.5 px-6 text-center">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${row["達標 Signal"] === '✅' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
+                                {row["達標 Signal"]}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={9} className="py-12 text-center text-gray-500 font-medium">
+                          目前沒有任何股票符合您的篩選閥值條件。請放寬左側的過濾參數。
                         </td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               ) : (
