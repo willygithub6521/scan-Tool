@@ -53,8 +53,111 @@ SCREENER_CACHE: Dict[str, Any] = {
     "cache_key": "",
     "gainers": [],
     "floats": {},
-    "closes": {}
+    "closes": {},
+    "updated_at": None
 }
+
+# Global state for cache pre-warming
+LAST_SCREENER_REQUEST: Optional["RealtimeScreenerRequest"] = None
+PREWARM_EXECUTION_TIME: float = 0.0
+PREWARM_TIMESTAMP: Optional[datetime.datetime] = None
+
+# Ticker-level individual floats cache
+GLOBAL_FLOATS_CACHE: Dict[str, float] = {}
+
+def get_floats_optimized(key: str, tickers: List[str]) -> Dict[str, float]:
+    global GLOBAL_FLOATS_CACHE
+    result = {}
+    missing_tickers = []
+    
+    for t in tickers:
+        if t in GLOBAL_FLOATS_CACHE:
+            result[t] = GLOBAL_FLOATS_CACHE[t]
+        else:
+            missing_tickers.append(t)
+            
+    if missing_tickers:
+        from data_fetcher import get_floats
+        # Fetch floats only for missing tickers
+        fetched = get_floats(key, missing_tickers)
+        for t, val in fetched.items():
+            GLOBAL_FLOATS_CACHE[t] = val
+            result[t] = val
+            
+    return result
+
+def background_prewarm_thread():
+    global LAST_SCREENER_REQUEST, PREWARM_EXECUTION_TIME, PREWARM_TIMESTAMP, SCREENER_CACHE
+    import threading
+    from data_fetcher import get_realtime_biggest_gainers, get_realtime_quotes, get_realtime_1min_closes, get_realtime_5min_closes
+    
+    print("Background pre-warm thread started.", flush=True)
+    
+    while True:
+        try:
+            time.sleep(1)
+            now = datetime.datetime.now()
+            # Run at exactly 50 seconds boundary
+            if now.second == 50 and LAST_SCREENER_REQUEST is not None:
+                req = LAST_SCREENER_REQUEST
+                key = req.fmp_api_key or os.environ.get("FMP_API_KEY", "")
+                if not key:
+                    continue
+                
+                print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Triggering background cache pre-warm...", flush=True)
+                start_t = time.time()
+                
+                # 1. Fetch gainers
+                gainers = get_realtime_biggest_gainers(key)
+                if not gainers:
+                    continue
+                tickers = [item['symbol'] for item in gainers if 'symbol' in item]
+                
+                # 2. Resolve interval
+                resolved_interval = "5min"
+                if "Auto" in req.intraday_interval:
+                    resolved_interval = "1min" if req.auto_refresh_mins < 5 else "5min"
+                elif "1min" in req.intraday_interval:
+                    resolved_interval = "1min"
+                else:
+                    resolved_interval = "5min"
+                
+                from_date = pd.Timestamp.now('US/Eastern').strftime('%Y-%m-%d') if req.today_only else ""
+                
+                # 3. Concurrent fetch quotes, floats (optimized), closes
+                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                    future_quotes = executor.submit(get_realtime_quotes, key, tickers)
+                    future_floats = executor.submit(get_floats_optimized, key, tickers)
+                    if resolved_interval == "1min":
+                        future_closes = executor.submit(get_realtime_1min_closes, key, tickers, from_date, req.extended_hours)
+                    else:
+                        future_closes = executor.submit(get_realtime_5min_closes, key, tickers, from_date, req.extended_hours)
+                    
+                    quotes = future_quotes.result()
+                    floats_dict = future_floats.result()
+                    closes_data = future_closes.result()
+                
+                # 4. Save to global cache
+                cache_key = f"{req.intraday_interval}_{req.today_only}_{req.extended_hours}_{req.auto_refresh_mins}"
+                SCREENER_CACHE["cache_key"] = cache_key
+                SCREENER_CACHE["gainers"] = gainers
+                SCREENER_CACHE["floats"] = floats_dict
+                SCREENER_CACHE["closes"] = closes_data
+                SCREENER_CACHE["updated_at"] = datetime.datetime.now()
+                
+                end_t = time.time()
+                PREWARM_EXECUTION_TIME = end_t - start_t
+                PREWARM_TIMESTAMP = SCREENER_CACHE["updated_at"]
+                
+                print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Pre-warm completed in {PREWARM_EXECUTION_TIME:.3f} seconds.", flush=True)
+                time.sleep(2)  # Avoid double trigger within the same second
+        except Exception as e:
+            print(f"Exception in pre-warm thread: {e}", flush=True)
+
+# Start daemon pre-warm thread
+import threading
+threading.Thread(target=background_prewarm_thread, daemon=True).start()
+
 
 def sanitize_value(val):
     """Recursively clean dicts/lists to convert numpy types and replace NaN/Infinity with None"""
@@ -491,13 +594,18 @@ def post_screener_realtime(req: RealtimeScreenerRequest):
     if not key:
         raise HTTPException(status_code=400, detail="FMP API Key is required for Real-time Screener.")
 
-    global SCREENER_CACHE
+    global SCREENER_CACHE, LAST_SCREENER_REQUEST
+    LAST_SCREENER_REQUEST = req
     
     # Construct config key to check if query criteria has changed
     cache_key = f"{req.intraday_interval}_{req.today_only}_{req.extended_hours}_{req.auto_refresh_mins}"
     
+    # Check if cache is fresh (e.g. less than 45 seconds old) and matches cache_key
+    cache_updated_at = SCREENER_CACHE.get("updated_at")
+    cache_age = (datetime.datetime.now() - cache_updated_at).total_seconds() if cache_updated_at else 99999.0
+    
     use_cache = (
-        req.lightweight 
+        (req.lightweight or cache_age < 45) 
         and SCREENER_CACHE["cache_key"] == cache_key 
         and len(SCREENER_CACHE["gainers"]) > 0
     )
@@ -528,10 +636,6 @@ def post_screener_realtime(req: RealtimeScreenerRequest):
 
         tickers = [item['symbol'] for item in gainers if 'symbol' in item]
         
-        # Parallel fetch quotes & closes
-        quotes = get_realtime_quotes(key, tickers)
-        floats_dict = get_floats(key, tickers)
-
         # Resolve interval
         resolved_interval = "5min"
         if "Auto" in req.intraday_interval:
@@ -543,23 +647,25 @@ def post_screener_realtime(req: RealtimeScreenerRequest):
 
         from_date = pd.Timestamp.now('US/Eastern').strftime('%Y-%m-%d') if req.today_only else ""
 
-        session = get_market_session_status()
-        if session == "regular":
+        # Concurrent execution of quotes, floats (optimized), and closes
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            future_quotes = executor.submit(get_realtime_quotes, key, tickers)
+            future_floats = executor.submit(get_floats_optimized, key, tickers)
             if resolved_interval == "1min":
-                closes_data = get_realtime_1min_closes(key, tickers, from_date=from_date, extended=req.extended_hours)
+                future_closes = executor.submit(get_realtime_1min_closes, key, tickers, from_date, req.extended_hours)
             else:
-                closes_data = get_realtime_5min_closes(key, tickers, from_date=from_date, extended=req.extended_hours)
-        else:
-            if resolved_interval == "1min":
-                closes_data = get_realtime_1min_closes(key, tickers, from_date=from_date, extended=req.extended_hours)
-            else:
-                closes_data = get_realtime_5min_closes(key, tickers, from_date=from_date, extended=req.extended_hours)
+                future_closes = executor.submit(get_realtime_5min_closes, key, tickers, from_date, req.extended_hours)
+
+            quotes = future_quotes.result()
+            floats_dict = future_floats.result()
+            closes_data = future_closes.result()
 
         # Save to global cache
         SCREENER_CACHE["cache_key"] = cache_key
         SCREENER_CACHE["gainers"] = gainers
         SCREENER_CACHE["floats"] = floats_dict
         SCREENER_CACHE["closes"] = closes_data
+        SCREENER_CACHE["updated_at"] = datetime.datetime.now()
 
     quotes_dict = {q['symbol']: q for q in quotes if 'symbol' in q}
 
@@ -682,7 +788,9 @@ def post_screener_realtime(req: RealtimeScreenerRequest):
     return sanitize_value({
         "results": results,
         "watchlist": watchlist,
-        "new_notifications": new_notifications
+        "new_notifications": new_notifications,
+        "prewarm_execution_time": PREWARM_EXECUTION_TIME,
+        "prewarmed": use_cache and (req.lightweight is False or cache_age < 45)
     })
 
 @app.post("/api/backtest/vectorized")

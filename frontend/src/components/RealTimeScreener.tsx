@@ -45,6 +45,8 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
   const [watchlist, setWatchlist] = useState<Record<string, any>>({});
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [fetchTime, setFetchTime] = useState<string>('');
+  const [prewarmTime, setPrewarmTime] = useState<number | null>(null);
+  const [wasPrewarmed, setWasPrewarmed] = useState<boolean>(false);
 
   // Refs to avoid state staleness in interval loop
   const watchlistRef = useRef<any>({});
@@ -124,6 +126,12 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
       setResults(response.data.results);
       setWatchlist(response.data.watchlist);
       setFetchTime(new Date().toLocaleTimeString());
+      if (response.data.prewarm_execution_time !== undefined) {
+        setPrewarmTime(response.data.prewarm_execution_time);
+      }
+      if (response.data.prewarmed !== undefined) {
+        setWasPrewarmed(response.data.prewarmed);
+      }
 
       // Trigger alerts if enabled and newly passed tickers found
       if (enableAlerts && response.data.new_notifications?.length > 0) {
@@ -394,12 +402,19 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                 <div className="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-ping"></div>
                 <h3 className="font-bold text-white text-base">📡 即時雷達追蹤 (Top Gainer Radar)</h3>
               </div>
-              {fetchTime && (
-                <span className="text-xs text-gray-500 font-semibold flex items-center space-x-1">
-                  <Clock size={12} />
-                  <span>資料更新時間: {fetchTime}</span>
-                </span>
-              )}
+              <div className="flex items-center space-x-4">
+                {fetchTime && (
+                  <span className="text-xs text-gray-500 font-semibold flex items-center space-x-1">
+                    <Clock size={12} />
+                    <span>資料更新時間: {fetchTime}</span>
+                  </span>
+                )}
+                {prewarmTime !== null && prewarmTime > 0 && (
+                  <span className={`text-xs px-2 py-0.5 rounded font-semibold ${wasPrewarmed ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-gray-800 text-gray-400 border border-gray-700'}`}>
+                    {wasPrewarmed ? '⚡ 背景預熱快取' : '💾 手動輕量更新'} (耗時: {prewarmTime.toFixed(2)}s)
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="overflow-x-auto flex-1 max-h-[42vh] overflow-y-auto">

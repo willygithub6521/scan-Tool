@@ -256,7 +256,7 @@ class FMPProvider(DataProvider):
                 pass
             return None
             
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
             futures = [executor.submit(fetch_single_float, t) for t in tickers]
             for future in concurrent.futures.as_completed(futures):
                 res = future.result()
@@ -301,7 +301,7 @@ class FMPProvider(DataProvider):
                 pass
             return None
             
-        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
             results = executor.map(fetch_single, tickers)
             closes = {res[0]: res[1] for res in results if res}
                     
@@ -343,7 +343,7 @@ class FMPProvider(DataProvider):
                 pass
             return None
             
-        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
             results = executor.map(fetch_single, tickers)
             closes = {res[0]: res[1] for res in results if res}
                     
