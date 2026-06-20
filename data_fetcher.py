@@ -313,8 +313,14 @@ class FMPProvider(DataProvider):
             return closes
             
         import concurrent.futures
+        import datetime
+        import threading
+        
+        req_count = 0
+        count_lock = threading.Lock()
         
         def fetch_single(ticker):
+            nonlocal req_count
             url = f"{self.base_url}/historical-chart/1min?symbol={ticker}&apikey={self.api_key}"
             if extended:
                 url += "&extended=true"
@@ -324,6 +330,11 @@ class FMPProvider(DataProvider):
                 url_with_from += f"&from={from_date}"
                 
             try:
+                with count_lock:
+                    req_count += 1
+                    current_count = req_count
+                print(f"[{datetime.datetime.now()}] [fetch_1min_closes] API request #{current_count} for {ticker}", flush=True)
+                
                 response = requests.get(url_with_from, timeout=10)
                 if response.status_code == 200:
                     data = response.json()
@@ -333,6 +344,11 @@ class FMPProvider(DataProvider):
                 
                 # Fallback: if from_date was specified but failed to return enough candles, try without it
                 if from_date:
+                    with count_lock:
+                        req_count += 1
+                        current_count = req_count
+                    print(f"[{datetime.datetime.now()}] [fetch_1min_closes] API fallback request #{current_count} for {ticker}", flush=True)
+                    
                     response = requests.get(url, timeout=10)
                     if response.status_code == 200:
                         data = response.json()
@@ -389,7 +405,9 @@ def get_intraday_data(ticker: str, interval: str, from_date: str, to_date: str, 
 
 # Real-time screener specific functions (no cache or very short cache)
 def get_realtime_biggest_gainers(api_key: str) -> list:
-    return FMPProvider(api_key).fetch_biggest_gainers()
+    # return FMPProvider(api_key).fetch_biggest_gainers()
+    gainers = FMPProvider(api_key).fetch_biggest_gainers()
+    return gainers[:20] if gainers else []
 
 def get_realtime_quotes(api_key: str, tickers: list) -> list:
     return FMPProvider(api_key).fetch_quotes(tickers)

@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { 
-  RefreshCw, 
-  Trash2, 
-  Bell, 
-  Sliders, 
-  Volume2, 
+import {
+  RefreshCw,
+  Trash2,
+  Bell,
+  Sliders,
+  Volume2,
   ShieldAlert,
   Clock
 } from 'lucide-react';
@@ -20,24 +20,108 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
   const [session, setSession] = useState<string>('closed');
   const [estTime, setEstTime] = useState<string>('');
 
+  const [hasStarted, setHasStarted] = useState<boolean>(false);
+
   // Auto-refresh config
-  const [autoRefreshMins, setAutoRefreshMins] = useState<number>(1);
-  const [intradayInterval, setIntradayInterval] = useState<string>('Auto (根據更新頻率)');
-  const [todayOnly, setTodayOnly] = useState<boolean>(true);
-  const [extendedHours, setExtendedHours] = useState<boolean>(true);
-  const [watchlistExpiryMins, setWatchlistExpiryMins] = useState<number>(15);
+  const [autoRefreshMins, setAutoRefreshMins] = useState<number>(() => {
+    const saved = localStorage.getItem('RTS_autoRefreshMins');
+    return saved ? Number(saved) : 1;
+  });
+  const [intradayInterval, setIntradayInterval] = useState<string>(() => {
+    return localStorage.getItem('RTS_intradayInterval') || 'Auto (根據更新頻率)';
+  });
+  const [todayOnly, setTodayOnly] = useState<boolean>(() => {
+    const saved = localStorage.getItem('RTS_todayOnly');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [extendedHours, setExtendedHours] = useState<boolean>(() => {
+    const saved = localStorage.getItem('RTS_extendedHours');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [watchlistExpiryMins, setWatchlistExpiryMins] = useState<number>(() => {
+    const saved = localStorage.getItem('RTS_watchlistExpiryMins');
+    return saved ? Number(saved) : 15;
+  });
 
   // Filters
-  const [minGap, setMinGap] = useState<number>(0.0);
-  const [minGainer, setMinGainer] = useState<number>(5.0);
-  const [minIntraday, setMinIntraday] = useState<number>(0.0);
-  const [minIntervalPct, setMinIntervalPct] = useState<number>(0.0);
-  const [minMktCap, setMinMktCap] = useState<number>(0.0);
-  const [maxMktCap, setMaxMktCap] = useState<number>(5000.0);
-  const [minFloat, setMinFloat] = useState<number>(0.0);
-  const [maxFloat, setMaxFloat] = useState<number>(500.0);
-  const [strictFilter, setStrictFilter] = useState<boolean>(true);
-  const [enableAlerts, setEnableAlerts] = useState<boolean>(false);
+  const [minGap, setMinGap] = useState<number>(() => {
+    const saved = localStorage.getItem('RTS_minGap');
+    return saved ? Number(saved) : 0.0;
+  });
+  const [minGainer, setMinGainer] = useState<number>(() => {
+    const saved = localStorage.getItem('RTS_minGainer');
+    return saved ? Number(saved) : 5.0;
+  });
+  const [minIntraday, setMinIntraday] = useState<number>(() => {
+    const saved = localStorage.getItem('RTS_minIntraday');
+    return saved ? Number(saved) : 0.0;
+  });
+  const [minIntervalPct, setMinIntervalPct] = useState<number>(() => {
+    const saved = localStorage.getItem('RTS_minIntervalPct');
+    return saved ? Number(saved) : 0.0;
+  });
+  const [minMktCap, setMinMktCap] = useState<number>(() => {
+    const saved = localStorage.getItem('RTS_minMktCap');
+    return saved ? Number(saved) : 0.0;
+  });
+  const [maxMktCap, setMaxMktCap] = useState<number>(() => {
+    const saved = localStorage.getItem('RTS_maxMktCap');
+    return saved ? Number(saved) : 5000.0;
+  });
+  const [minFloat, setMinFloat] = useState<number>(() => {
+    const saved = localStorage.getItem('RTS_minFloat');
+    return saved ? Number(saved) : 0.0;
+  });
+  const [maxFloat, setMaxFloat] = useState<number>(() => {
+    const saved = localStorage.getItem('RTS_maxFloat');
+    return saved ? Number(saved) : 500.0;
+  });
+  const [minPrice, setMinPrice] = useState<number>(() => {
+    const saved = localStorage.getItem('RTS_minPrice');
+    return saved ? Number(saved) : 0.0;
+  });
+  const [maxPrice, setMaxPrice] = useState<number>(() => {
+    const saved = localStorage.getItem('RTS_maxPrice');
+    return saved ? Number(saved) : 1000.0;
+  });
+  const [strictFilter, setStrictFilter] = useState<boolean>(() => {
+    const saved = localStorage.getItem('RTS_strictFilter');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [enableAlerts, setEnableAlerts] = useState<boolean>(() => {
+    const saved = localStorage.getItem('RTS_enableAlerts');
+    return saved !== null ? saved === 'true' : false;
+  });
+
+  // Filter Toggles (Active / Display only)
+  const [filterGap, setFilterGap] = useState<boolean>(() => {
+    const saved = localStorage.getItem('RTS_filterGap');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [filterGainer, setFilterGainer] = useState<boolean>(() => {
+    const saved = localStorage.getItem('RTS_filterGainer');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [filterIntraday, setFilterIntraday] = useState<boolean>(() => {
+    const saved = localStorage.getItem('RTS_filterIntraday');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [filterInterval, setFilterInterval] = useState<boolean>(() => {
+    const saved = localStorage.getItem('RTS_filterInterval');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [filterMktCap, setFilterMktCap] = useState<boolean>(() => {
+    const saved = localStorage.getItem('RTS_filterMktCap');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [filterFloat, setFilterFloat] = useState<boolean>(() => {
+    const saved = localStorage.getItem('RTS_filterFloat');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [filterPrice, setFilterPrice] = useState<boolean>(() => {
+    const saved = localStorage.getItem('RTS_filterPrice');
+    return saved !== null ? saved === 'true' : true;
+  });
 
   // API states
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -145,6 +229,41 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
     }
   };
 
+  // Persist settings to localStorage
+  useEffect(() => {
+    localStorage.setItem('RTS_autoRefreshMins', autoRefreshMins.toString());
+    localStorage.setItem('RTS_intradayInterval', intradayInterval);
+    localStorage.setItem('RTS_todayOnly', todayOnly.toString());
+    localStorage.setItem('RTS_extendedHours', extendedHours.toString());
+    localStorage.setItem('RTS_watchlistExpiryMins', watchlistExpiryMins.toString());
+  }, [autoRefreshMins, intradayInterval, todayOnly, extendedHours, watchlistExpiryMins]);
+
+  useEffect(() => {
+    localStorage.setItem('RTS_minGap', minGap.toString());
+    localStorage.setItem('RTS_minGainer', minGainer.toString());
+    localStorage.setItem('RTS_minIntraday', minIntraday.toString());
+    localStorage.setItem('RTS_minIntervalPct', minIntervalPct.toString());
+    localStorage.setItem('RTS_minMktCap', minMktCap.toString());
+    localStorage.setItem('RTS_maxMktCap', maxMktCap.toString());
+    localStorage.setItem('RTS_minFloat', minFloat.toString());
+    localStorage.setItem('RTS_maxFloat', maxFloat.toString());
+    localStorage.setItem('RTS_minPrice', minPrice.toString());
+    localStorage.setItem('RTS_maxPrice', maxPrice.toString());
+    localStorage.setItem('RTS_strictFilter', strictFilter.toString());
+    localStorage.setItem('RTS_enableAlerts', enableAlerts.toString());
+
+    localStorage.setItem('RTS_filterGap', filterGap.toString());
+    localStorage.setItem('RTS_filterGainer', filterGainer.toString());
+    localStorage.setItem('RTS_filterIntraday', filterIntraday.toString());
+    localStorage.setItem('RTS_filterInterval', filterInterval.toString());
+    localStorage.setItem('RTS_filterMktCap', filterMktCap.toString());
+    localStorage.setItem('RTS_filterFloat', filterFloat.toString());
+    localStorage.setItem('RTS_filterPrice', filterPrice.toString());
+  }, [
+    minGap, minGainer, minIntraday, minIntervalPct, minMktCap, maxMktCap, minFloat, maxFloat, minPrice, maxPrice, strictFilter, enableAlerts,
+    filterGap, filterGainer, filterIntraday, filterInterval, filterMktCap, filterFloat, filterPrice
+  ]);
+
   // Trigger permission request on enable
   useEffect(() => {
     if (enableAlerts && "Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
@@ -163,15 +282,15 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
   // Handle auto-refresh interval lifecycle (precision updates on exact 00 seconds)
   useEffect(() => {
     fetchSession();
-    // Initial fetch (full fetch)
-    latestFetchRadarData.current(false, false);
 
     // Set a 1-second interval to check for the start of each minute
     const activeInterval = setInterval(() => {
+      if (!hasStarted) return; // Do not auto-refresh if monitoring hasn't started yet
+
       const now = new Date();
       const currentMin = now.getMinutes();
       const currentSec = now.getSeconds();
-      
+
       // Trigger when seconds is exactly 0 and it matches the autoRefreshMins interval
       if (currentSec === 0 && (currentMin % autoRefreshMins === 0) && lastTriggeredMinRef.current !== currentMin) {
         lastTriggeredMinRef.current = currentMin;
@@ -181,7 +300,12 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
     }, 1000);
 
     return () => clearInterval(activeInterval);
-  }, [autoRefreshMins, apiKey, intradayInterval, todayOnly, extendedHours, watchlistExpiryMins]);
+  }, [autoRefreshMins, apiKey, intradayInterval, todayOnly, extendedHours, watchlistExpiryMins, hasStarted]);
+
+  const handleManualClick = async () => {
+    setHasStarted(true);
+    await handleFetchRadarData(false, results.length > 0);
+  };
 
   // Clean watchlist trigger
   const handleClearWatchlist = () => {
@@ -193,28 +317,39 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
     const gapVal = row["Gap (%)"] ?? 0;
     const gainerVal = row["Gainer (%)"] ?? 0;
     const intradayVal = row["開盤到目前漲幅 (%)"] ?? 0;
-    
+
     // Find the dynamic key for N minutes interval return
     const intervalKey = Object.keys(row).find(k => k.startsWith("最近") && k.endsWith("最大漲幅 (%)")) || `最近${autoRefreshMins}分鐘最大漲幅 (%)`;
     const intervalVal = row[intervalKey] ?? 0;
-    
+
     const mcVal = row["Market Cap (M)"] ?? 0;
     const floatVal = row["Float (M)"] ?? 0;
+    const priceVal = row["Price"] ?? 0;
 
-    const condGap = gapVal >= minGap;
-    const condGainer = gainerVal >= minGainer;
-    const condIntraday = intradayVal >= minIntraday;
-    const condInterval = intervalVal >= minIntervalPct;
+    const condGap = filterGap ? (gapVal >= minGap) : true;
+    const condGainer = filterGainer ? (gainerVal >= minGainer) : true;
+    const condIntraday = filterIntraday ? (intradayVal >= minIntraday) : true;
+    const condInterval = filterInterval ? (intervalVal >= minIntervalPct) : true;
 
     let condMc = true;
-    if (minMktCap > 0) condMc = condMc && (mcVal >= minMktCap);
-    if (maxMktCap > 0) condMc = condMc && (mcVal <= maxMktCap);
+    if (filterMktCap) {
+      if (minMktCap > 0) condMc = condMc && (mcVal >= minMktCap);
+      if (maxMktCap > 0) condMc = condMc && (mcVal <= maxMktCap);
+    }
 
     let condFloat = true;
-    if (minFloat > 0) condFloat = condFloat && (floatVal >= minFloat);
-    if (maxFloat > 0) condFloat = condFloat && (floatVal <= maxFloat);
+    if (filterFloat) {
+      if (minFloat > 0) condFloat = condFloat && (floatVal >= minFloat);
+      if (maxFloat > 0) condFloat = condFloat && (floatVal <= maxFloat);
+    }
 
-    const isPassed = condGap && condGainer && condIntraday && condInterval && condMc && condFloat;
+    let condPrice = true;
+    if (filterPrice) {
+      if (minPrice > 0) condPrice = condPrice && (priceVal >= minPrice);
+      if (maxPrice > 0) condPrice = condPrice && (priceVal <= maxPrice);
+    }
+
+    const isPassed = condGap && condGainer && condIntraday && condInterval && condMc && condFloat && condPrice;
 
     return {
       ...row,
@@ -245,7 +380,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
             即時監控美股盤中最大的暴漲股，配合分鐘K線進行拉回 (Pullback) 幅度追蹤，自動提供買點訊號警示。
           </p>
         </div>
-        
+
         {/* Market status indicator */}
         <div className="flex items-center space-x-2">
           {session === 'regular' ? (
@@ -276,15 +411,15 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
               <Sliders size={14} className="text-indigo-400" />
               <span>自動整理配置</span>
             </h3>
-            
+
             <div className="space-y-1">
               <label className="text-xs font-medium text-gray-500">更新頻率 (分鐘)</label>
-              <input 
-                type="number" 
+              <input
+                type="number"
                 value={autoRefreshMins}
                 onChange={(e) => setAutoRefreshMins(Number(e.target.value))}
-                className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500" 
-                min={1} 
+                className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                min={1}
               />
             </div>
 
@@ -318,39 +453,106 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">閥值過濾參數</h3>
             <div className="space-y-2.5 text-xs">
               <div>
-                <label className="text-gray-500 block">跳空大於 (%)</label>
-                <input type="number" value={minGap} onChange={(e) => setMinGap(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
-              </div>
-              <div>
-                <label className="text-gray-500 block">即時累計漲幅大於 (%)</label>
-                <input type="number" value={minGainer} onChange={(e) => setMinGainer(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
-              </div>
-              <div>
-                <label className="text-gray-500 block">開盤到當前漲幅大於 (%)</label>
-                <input type="number" value={minIntraday} onChange={(e) => setMinIntraday(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
-              </div>
-              <div>
-                <label className="text-gray-500 block">最近幾分鐘最大波動漲幅 (%)</label>
-                <input type="number" value={minIntervalPct} onChange={(e) => setMinIntervalPct(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] text-gray-500">最低市值 (M)</label>
-                  <input type="number" value={minMktCap} onChange={(e) => setMinMktCap(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-1.5 py-0.5 text-white" />
+                <div className="flex justify-between items-center">
+                  <label className="text-gray-500 block">跳空大於 (%)</label>
+                  <label className="flex items-center space-x-1 cursor-pointer">
+                    <input type="checkbox" checked={filterGap} onChange={(e) => setFilterGap(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 w-3 h-3 cursor-pointer" />
+                    <span className="text-[10px] text-gray-400">啟用篩選</span>
+                  </label>
                 </div>
-                <div>
-                  <label className="text-[10px] text-gray-500">最高市值 (M)</label>
-                  <input type="number" value={maxMktCap} onChange={(e) => setMaxMktCap(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-1.5 py-0.5 text-white" />
+                <input type="number" value={minGap} onChange={(e) => setMinGap(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white disabled:opacity-50" disabled={!filterGap} />
+              </div>
+              
+              <div>
+                <div className="flex justify-between items-center">
+                  <label className="text-gray-500 block">即時累計漲幅大於 (%)</label>
+                  <label className="flex items-center space-x-1 cursor-pointer">
+                    <input type="checkbox" checked={filterGainer} onChange={(e) => setFilterGainer(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 w-3 h-3 cursor-pointer" />
+                    <span className="text-[10px] text-gray-400">啟用篩選</span>
+                  </label>
+                </div>
+                <input type="number" value={minGainer} onChange={(e) => setMinGainer(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white disabled:opacity-50" disabled={!filterGainer} />
+              </div>
+              
+              <div>
+                <div className="flex justify-between items-center">
+                  <label className="text-gray-500 block">開盤到當前漲幅大於 (%)</label>
+                  <label className="flex items-center space-x-1 cursor-pointer">
+                    <input type="checkbox" checked={filterIntraday} onChange={(e) => setFilterIntraday(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 w-3 h-3 cursor-pointer" />
+                    <span className="text-[10px] text-gray-400">啟用篩選</span>
+                  </label>
+                </div>
+                <input type="number" value={minIntraday} onChange={(e) => setMinIntraday(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white disabled:opacity-50" disabled={!filterIntraday} />
+              </div>
+              
+              <div>
+                <div className="flex justify-between items-center">
+                  <label className="text-gray-500 block">最近幾分鐘最大波動漲幅 (%)</label>
+                  <label className="flex items-center space-x-1 cursor-pointer">
+                    <input type="checkbox" checked={filterInterval} onChange={(e) => setFilterInterval(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 w-3 h-3 cursor-pointer" />
+                    <span className="text-[10px] text-gray-400">啟用篩選</span>
+                  </label>
+                </div>
+                <input type="number" value={minIntervalPct} onChange={(e) => setMinIntervalPct(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white disabled:opacity-50" disabled={!filterInterval} />
+              </div>
+              
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-gray-500 block">市值過濾 (M)</label>
+                  <label className="flex items-center space-x-1 cursor-pointer">
+                    <input type="checkbox" checked={filterMktCap} onChange={(e) => setFilterMktCap(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 w-3 h-3 cursor-pointer" />
+                    <span className="text-[10px] text-gray-400">啟用篩選</span>
+                  </label>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-gray-500">最低市值 (M)</label>
+                    <input type="number" value={minMktCap} onChange={(e) => setMinMktCap(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-1.5 py-0.5 text-white disabled:opacity-50" disabled={!filterMktCap} />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500">最高市值 (M)</label>
+                    <input type="number" value={maxMktCap} onChange={(e) => setMaxMktCap(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-1.5 py-0.5 text-white disabled:opacity-50" disabled={!filterMktCap} />
+                  </div>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] text-gray-500">最低流通 (M)</label>
-                  <input type="number" value={minFloat} onChange={(e) => setMinFloat(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-1.5 py-0.5 text-white" />
+              
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-gray-500 block">流通量過濾 (M)</label>
+                  <label className="flex items-center space-x-1 cursor-pointer">
+                    <input type="checkbox" checked={filterFloat} onChange={(e) => setFilterFloat(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 w-3 h-3 cursor-pointer" />
+                    <span className="text-[10px] text-gray-400">啟用篩選</span>
+                  </label>
                 </div>
-                <div>
-                  <label className="text-[10px] text-gray-500">最高流通 (M)</label>
-                  <input type="number" value={maxFloat} onChange={(e) => setMaxFloat(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-1.5 py-0.5 text-white" />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-gray-500">最低流通 (M)</label>
+                    <input type="number" value={minFloat} onChange={(e) => setMinFloat(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-1.5 py-0.5 text-white disabled:opacity-50" disabled={!filterFloat} />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500">最高流通 (M)</label>
+                    <input type="number" value={maxFloat} onChange={(e) => setMaxFloat(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-1.5 py-0.5 text-white disabled:opacity-50" disabled={!filterFloat} />
+                  </div>
+                </div>
+              </div>
+              
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-gray-500 block">股價過濾 ($)</label>
+                  <label className="flex items-center space-x-1 cursor-pointer">
+                    <input type="checkbox" checked={filterPrice} onChange={(e) => setFilterPrice(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 w-3 h-3 cursor-pointer" />
+                    <span className="text-[10px] text-gray-400">啟用篩選</span>
+                  </label>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-gray-500">最低股價 ($)</label>
+                    <input type="number" value={minPrice} onChange={(e) => setMinPrice(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-1.5 py-0.5 text-white disabled:opacity-50" disabled={!filterPrice} />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500">最高股價 ($)</label>
+                    <input type="number" value={maxPrice} onChange={(e) => setMaxPrice(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-1.5 py-0.5 text-white disabled:opacity-50" disabled={!filterPrice} />
+                  </div>
                 </div>
               </div>
             </div>
@@ -372,7 +574,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
           </div>
 
           <button
-            onClick={() => handleFetchRadarData(false, results.length > 0)}
+            onClick={handleManualClick}
             disabled={isLoading}
             className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800/40 text-white rounded-xl py-3 px-4 font-semibold text-sm shadow-lg shadow-indigo-600/35 transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
           >
@@ -475,7 +677,11 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
               ) : (
                 <div className="p-12 text-center text-gray-600">
                   <ShieldAlert className="mx-auto mb-2 text-gray-700" size={32} />
-                  <span>目前雷達內無監控資料，請確認您的 API 金鑰。</span>
+                  <span>
+                    {!hasStarted
+                      ? '請點擊左側「手動更新雷達」開始載入即時監控數據。'
+                      : '目前雷達內無監控資料，請確認您的 API 金鑰。'}
+                  </span>
                 </div>
               )}
             </div>
@@ -519,7 +725,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                       const elapsedMins = Math.floor(elapsedSecs / 60);
                       const elapsedSecsRemain = elapsedSecs % 60;
                       const elapsedStr = `${elapsedMins}分${elapsedSecsRemain}秒前`;
-                      
+
                       const currentQuote = results.find(r => r.Ticker === ticker);
                       const currentPrice = currentQuote ? currentQuote.Price : info.trigger_price;
                       const maxPrice = Math.max(info.max_price_since_trigger, currentPrice);
