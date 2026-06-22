@@ -31,7 +31,7 @@ def get_market_session():
         print(f"[ERROR] get_market_session failed: {e}", flush=True)
         return "closed"
 
-def get_closes_with_cache(api_key, tickers, resolved_interval, from_date, extended, cache_dict):
+def get_closes_with_cache(api_key, tickers, resolved_interval, from_date, extended, cache_dict, limit=10):
     """常規交易時段使用：取得K線並使用本地快取以免頻繁請求"""
     now_est = pd.Timestamp.now('US/Eastern')
     valid_closes = {}
@@ -49,7 +49,7 @@ def get_closes_with_cache(api_key, tickers, resolved_interval, from_date, extend
             else:
                 expired = (cached_time.day != now_est.day) or (cached_time.hour != now_est.hour) or (cached_time.minute // 5 != now_est.minute // 5)
             
-            if not expired and cached["closes"]:
+            if not expired and cached["closes"] and len(cached["closes"]) >= limit:
                 valid_closes[ticker] = cached["closes"]
                 continue
                 
@@ -58,9 +58,9 @@ def get_closes_with_cache(api_key, tickers, resolved_interval, from_date, extend
     if tickers_to_fetch:
         try:
             if resolved_interval == "1min":
-                fetched = get_realtime_1min_closes(api_key, tickers_to_fetch, from_date=from_date, extended=extended)
+                fetched = get_realtime_1min_closes(api_key, tickers_to_fetch, from_date=from_date, extended=extended, limit=limit)
             else:
-                fetched = get_realtime_5min_closes(api_key, tickers_to_fetch, from_date=from_date, extended=extended)
+                fetched = get_realtime_5min_closes(api_key, tickers_to_fetch, from_date=from_date, extended=extended, limit=limit)
                 
             for ticker, closes in fetched.items():
                 if closes:
@@ -111,7 +111,8 @@ def get_global_rts_state():
             "today_only": True,
             "extended": True,
             "auto_refresh_mins": 5,
-            "watchlist_expiry_mins": 15
+            "watchlist_expiry_mins": 15,
+            "recent_mins_window": 5
         }
     }
 
@@ -157,14 +158,15 @@ def start_background_thread(state):
                                     "interval": "Auto (根據更新頻率)",
                                     "today_only": True,
                                     "extended": True,
-                                    "auto_refresh_mins": 5
+                                    "auto_refresh_mins": 5,
+                                    "recent_mins_window": 5
                                 })
                                 
                                 # Resolve actual interval
                                 resolved_interval = "5min"
                                 interval_setting = settings.get("interval", "Auto (根據更新頻率)")
                                 if "Auto" in interval_setting:
-                                    ref_mins = settings.get("auto_refresh_mins", 5)
+                                    ref_mins = settings.get("recent_mins_window", 5)
                                     resolved_interval = "1min" if ref_mins < 5 else "5min"
                                 elif "1min" in interval_setting:
                                     resolved_interval = "1min"
@@ -180,16 +182,19 @@ def start_background_thread(state):
                                 
                                 # 3. Fetch closes list (returns last 10 closes)
                                 session = get_market_session()
+                                recent_mins_window = settings.get("recent_mins_window", 5)
+                                limit_val = max(10, recent_mins_window) if resolved_interval == "1min" else max(10, (recent_mins_window + 4) // 5)
                                 if session == "regular":
                                     closes_data = get_closes_with_cache(
                                         api_key, tickers, resolved_interval, 
-                                        from_date, extended, state_dict["historical_closes_cache"]
+                                        from_date, extended, state_dict["historical_closes_cache"],
+                                        limit=limit_val
                                     )
                                 else:
                                     if resolved_interval == "1min":
-                                        closes_data = get_realtime_1min_closes(api_key, tickers, from_date=from_date, extended=extended)
+                                        closes_data = get_realtime_1min_closes(api_key, tickers, from_date=from_date, extended=extended, limit=limit_val)
                                     else:
-                                        closes_data = get_realtime_5min_closes(api_key, tickers, from_date=from_date, extended=extended)
+                                        closes_data = get_realtime_5min_closes(api_key, tickers, from_date=from_date, extended=extended, limit=limit_val)
                                 
                                 state_dict["data"] = {
                                     "gainers": gainers,
@@ -252,6 +257,7 @@ def render_page():
     # Auto-refresh setup
     col_ref1, col_ref2 = st.sidebar.columns([2, 1])
     auto_refresh_mins = col_ref1.number_input("自動更新頻率 (分鐘)", value=5, min_value=1, step=1, key="auto_refresh_mins")
+    recent_mins_window = st.sidebar.number_input("最近漲幅計算區間 (分鐘)", value=5, min_value=1, step=1, key="recent_mins_window")
     
     if "rts_refresh_count" not in st.session_state:
         st.session_state["rts_refresh_count"] = 0
@@ -275,13 +281,14 @@ def render_page():
         "today_only": today_only,
         "extended": extended_hours,
         "auto_refresh_mins": auto_refresh_mins,
-        "watchlist_expiry_mins": watchlist_expiry_mins
+        "watchlist_expiry_mins": watchlist_expiry_mins,
+        "recent_mins_window": recent_mins_window
     }
 
     # Resolve actual interval for UI and instant fetching
     resolved_interval_ui = "5min"
     if "Auto" in intraday_interval:
-        resolved_interval_ui = "1min" if auto_refresh_mins < 5 else "5min"
+        resolved_interval_ui = "1min" if recent_mins_window < 5 else "5min"
     elif "1min" in intraday_interval:
         resolved_interval_ui = "1min"
     else:
@@ -289,9 +296,9 @@ def render_page():
 
     # Compute actual window minutes for UI labels
     if resolved_interval_ui == "1min":
-        actual_window_mins_ui = min(auto_refresh_mins, 10)
+        actual_window_mins_ui = min(recent_mins_window, 10)
     else:
-        actual_window_mins_ui = min(max(1, auto_refresh_mins // 5), 10) * 5
+        actual_window_mins_ui = min(max(1, recent_mins_window // 5), 10) * 5
 
     # Detect interval change to properly restart timer
     if st.session_state.get("prev_auto_refresh_mins", auto_refresh_mins) != auto_refresh_mins:
@@ -324,16 +331,18 @@ def render_page():
                 from_date = pd.Timestamp.now('US/Eastern').strftime('%Y-%m-%d') if today_only else ""
                 
                 session = get_market_session()
+                limit_val = max(10, recent_mins_window) if resolved_interval_ui == "1min" else max(10, (recent_mins_window + 4) // 5)
                 if session == "regular":
                     closes_data = get_closes_with_cache(
                         fmp_api_key, tickers, resolved_interval_ui, 
-                        from_date, extended_hours, RTS_STATE["historical_closes_cache"]
+                        from_date, extended_hours, RTS_STATE["historical_closes_cache"],
+                        limit=limit_val
                     )
                 else:
                     if resolved_interval_ui == "1min":
-                        closes_data = get_realtime_1min_closes(fmp_api_key, tickers, from_date=from_date, extended=extended_hours)
+                        closes_data = get_realtime_1min_closes(fmp_api_key, tickers, from_date=from_date, extended=extended_hours, limit=limit_val)
                     else:
-                        closes_data = get_realtime_5min_closes(fmp_api_key, tickers, from_date=from_date, extended=extended_hours)
+                        closes_data = get_realtime_5min_closes(fmp_api_key, tickers, from_date=from_date, extended=extended_hours, limit=limit_val)
                 
                 RTS_STATE["data"] = {
                     "gainers": gainers,
@@ -482,14 +491,14 @@ def render_page():
     resolved_interval = data_cache.get("resolved_interval", "5min")
     
     # Calculate completed K-line count and actual window minutes
-    max_closes = 10
+    max_closes = max(10, recent_mins_window) if resolved_interval == "1min" else max(10, (recent_mins_window + 4) // 5)
     if resolved_interval == "1min":
         closes_dict = data_cache.get("closes_1min") or {}
-        num_candles = min(auto_refresh_mins, max_closes)
+        num_candles = min(recent_mins_window, max_closes)
         actual_window_mins = num_candles
     else:
         closes_dict = data_cache.get("closes_5min") or {}
-        num_candles = min(max(1, auto_refresh_mins // 5), max_closes)
+        num_candles = min(max(1, recent_mins_window // 5), max_closes)
         actual_window_mins = num_candles * 5
         
     pct_col_name = f"最近{actual_window_mins}分鐘最大漲幅 (%)"
@@ -520,9 +529,9 @@ def render_page():
         
         # Calculate dynamic window sizes
         if resolved_interval == "1min":
-            candle_count = min(auto_refresh_mins, len(prev_candle_closes))
+            candle_count = min(recent_mins_window, len(prev_candle_closes))
         else:
-            candle_count = min(max(1, auto_refresh_mins // 5), len(prev_candle_closes))
+            candle_count = min(max(1, recent_mins_window // 5), len(prev_candle_closes))
             
         session = get_market_session()
         if session == "regular":

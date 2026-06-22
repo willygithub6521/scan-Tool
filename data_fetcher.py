@@ -265,7 +265,7 @@ class FMPProvider(DataProvider):
                     
         return floats
 
-    def fetch_5min_closes(self, tickers: list, from_date: str = "", extended: bool = False) -> dict:
+    def fetch_5min_closes(self, tickers: list, from_date: str = "", extended: bool = False, limit: int = 10) -> dict:
         closes = {}
         if not tickers:
             return closes
@@ -286,7 +286,7 @@ class FMPProvider(DataProvider):
                 if response.status_code == 200:
                     data = response.json()
                     if isinstance(data, list) and len(data) >= 2:
-                        closes_list = [c['close'] for c in data[1:11]]
+                        closes_list = [c['close'] for c in data[1:limit+1]]
                         return (ticker, closes_list)
                 
                 # Fallback: if from_date was specified but failed to return enough candles, try without it
@@ -295,7 +295,7 @@ class FMPProvider(DataProvider):
                     if response.status_code == 200:
                         data = response.json()
                         if isinstance(data, list) and len(data) >= 2:
-                            closes_list = [c['close'] for c in data[1:11]]
+                            closes_list = [c['close'] for c in data[1:limit+1]]
                             return (ticker, closes_list)
             except Exception:
                 pass
@@ -307,7 +307,7 @@ class FMPProvider(DataProvider):
                     
         return closes
 
-    def fetch_1min_closes(self, tickers: list, from_date: str = "", extended: bool = False) -> dict:
+    def fetch_1min_closes(self, tickers: list, from_date: str = "", extended: bool = False, limit: int = 10) -> dict:
         closes = {}
         if not tickers:
             return closes
@@ -339,7 +339,7 @@ class FMPProvider(DataProvider):
                 if response.status_code == 200:
                     data = response.json()
                     if isinstance(data, list) and len(data) >= 2:
-                        closes_list = [c['close'] for c in data[1:11]]
+                        closes_list = [c['close'] for c in data[1:limit+1]]
                         return (ticker, closes_list)
                 
                 # Fallback: if from_date was specified but failed to return enough candles, try without it
@@ -353,7 +353,7 @@ class FMPProvider(DataProvider):
                     if response.status_code == 200:
                         data = response.json()
                         if isinstance(data, list) and len(data) >= 2:
-                            closes_list = [c['close'] for c in data[1:11]]
+                            closes_list = [c['close'] for c in data[1:limit+1]]
                             return (ticker, closes_list)
             except Exception:
                 pass
@@ -416,8 +416,8 @@ def get_realtime_quotes(api_key: str, tickers: list) -> list:
 def get_floats(api_key: str, tickers: list) -> dict:
     return FMPProvider(api_key).fetch_floats(tickers)
 
-def get_realtime_5min_closes(api_key: str, tickers: list, from_date: str = "", extended: bool = False) -> dict:
-    return FMPProvider(api_key).fetch_5min_closes(tickers, from_date, extended)
+def get_realtime_5min_closes(api_key: str, tickers: list, from_date: str = "", extended: bool = False, limit: int = 10) -> dict:
+    return FMPProvider(api_key).fetch_5min_closes(tickers, from_date, extended, limit)
 
-def get_realtime_1min_closes(api_key: str, tickers: list, from_date: str = "", extended: bool = False) -> dict:
-    return FMPProvider(api_key).fetch_1min_closes(tickers, from_date, extended)
+def get_realtime_1min_closes(api_key: str, tickers: list, from_date: str = "", extended: bool = False, limit: int = 10) -> dict:
+    return FMPProvider(api_key).fetch_1min_closes(tickers, from_date, extended, limit)

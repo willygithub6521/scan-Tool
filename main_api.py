@@ -97,8 +97,8 @@ def background_prewarm_thread():
         try:
             time.sleep(1)
             now = datetime.datetime.now()
-            # Run at exactly 50 seconds boundary
-            if now.second == 50 and LAST_SCREENER_REQUEST is not None:
+            # Run at exactly 3 seconds boundary to allow the previous minute's candle to finalize
+            if now.second == 3 and LAST_SCREENER_REQUEST is not None:
                 req = LAST_SCREENER_REQUEST
                 key = req.fmp_api_key or os.environ.get("FMP_API_KEY", "")
                 if not key:
@@ -116,7 +116,7 @@ def background_prewarm_thread():
                 # 2. Resolve interval
                 resolved_interval = "5min"
                 if "Auto" in req.intraday_interval:
-                    resolved_interval = "1min" if req.auto_refresh_mins < 5 else "5min"
+                    resolved_interval = "1min" if req.recent_mins_window < 5 else "5min"
                 elif "1min" in req.intraday_interval:
                     resolved_interval = "1min"
                 else:
@@ -125,20 +125,21 @@ def background_prewarm_thread():
                 from_date = pd.Timestamp.now('US/Eastern').strftime('%Y-%m-%d') if req.today_only else ""
                 
                 # 3. Concurrent fetch quotes, floats (optimized), closes
+                limit_val = max(10, req.recent_mins_window) if resolved_interval == "1min" else max(10, (req.recent_mins_window + 4) // 5)
                 with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
                     future_quotes = executor.submit(get_realtime_quotes, key, tickers)
                     future_floats = executor.submit(get_floats_optimized, key, tickers)
                     if resolved_interval == "1min":
-                        future_closes = executor.submit(get_realtime_1min_closes, key, tickers, from_date, req.extended_hours)
+                        future_closes = executor.submit(get_realtime_1min_closes, key, tickers, from_date, req.extended_hours, limit_val)
                     else:
-                        future_closes = executor.submit(get_realtime_5min_closes, key, tickers, from_date, req.extended_hours)
+                        future_closes = executor.submit(get_realtime_5min_closes, key, tickers, from_date, req.extended_hours, limit_val)
                     
                     quotes = future_quotes.result()
                     floats_dict = future_floats.result()
                     closes_data = future_closes.result()
                 
                 # 4. Save to global cache
-                cache_key = f"{req.intraday_interval}_{req.today_only}_{req.extended_hours}_{req.auto_refresh_mins}"
+                cache_key = f"{req.intraday_interval}_{req.today_only}_{req.extended_hours}_{req.auto_refresh_mins}_{req.recent_mins_window}"
                 SCREENER_CACHE["cache_key"] = cache_key
                 SCREENER_CACHE["gainers"] = gainers
                 SCREENER_CACHE["floats"] = floats_dict
@@ -213,6 +214,7 @@ class RealtimeScreenerRequest(BaseModel):
     min_gainer: float = 5.0
     min_intraday: float = 0.0
     min_interval_pct: float = 0.0
+    recent_mins_window: int = 5
     min_mc_m: float = 0.0
     max_mc_m: float = 5000.0
     min_float_m: float = 0.0
@@ -598,7 +600,7 @@ def post_screener_realtime(req: RealtimeScreenerRequest):
     LAST_SCREENER_REQUEST = req
     
     # Construct config key to check if query criteria has changed
-    cache_key = f"{req.intraday_interval}_{req.today_only}_{req.extended_hours}_{req.auto_refresh_mins}"
+    cache_key = f"{req.intraday_interval}_{req.today_only}_{req.extended_hours}_{req.auto_refresh_mins}_{req.recent_mins_window}"
     
     # Check if cache is fresh (e.g. less than 45 seconds old) and matches cache_key
     cache_updated_at = SCREENER_CACHE.get("updated_at")
@@ -623,7 +625,7 @@ def post_screener_realtime(req: RealtimeScreenerRequest):
         # Resolve interval
         resolved_interval = "5min"
         if "Auto" in req.intraday_interval:
-            resolved_interval = "1min" if req.auto_refresh_mins < 5 else "5min"
+            resolved_interval = "1min" if req.recent_mins_window < 5 else "5min"
         elif "1min" in req.intraday_interval:
             resolved_interval = "1min"
         else:
@@ -639,7 +641,7 @@ def post_screener_realtime(req: RealtimeScreenerRequest):
         # Resolve interval
         resolved_interval = "5min"
         if "Auto" in req.intraday_interval:
-            resolved_interval = "1min" if req.auto_refresh_mins < 5 else "5min"
+            resolved_interval = "1min" if req.recent_mins_window < 5 else "5min"
         elif "1min" in req.intraday_interval:
             resolved_interval = "1min"
         else:
@@ -647,14 +649,16 @@ def post_screener_realtime(req: RealtimeScreenerRequest):
 
         from_date = pd.Timestamp.now('US/Eastern').strftime('%Y-%m-%d') if req.today_only else ""
 
+        max_closes = max(10, req.recent_mins_window) if resolved_interval == "1min" else max(10, (req.recent_mins_window + 4) // 5)
+
         # Concurrent execution of quotes, floats (optimized), and closes
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             future_quotes = executor.submit(get_realtime_quotes, key, tickers)
             future_floats = executor.submit(get_floats_optimized, key, tickers)
             if resolved_interval == "1min":
-                future_closes = executor.submit(get_realtime_1min_closes, key, tickers, from_date, req.extended_hours)
+                future_closes = executor.submit(get_realtime_1min_closes, key, tickers, from_date, req.extended_hours, max_closes)
             else:
-                future_closes = executor.submit(get_realtime_5min_closes, key, tickers, from_date, req.extended_hours)
+                future_closes = executor.submit(get_realtime_5min_closes, key, tickers, from_date, req.extended_hours, max_closes)
 
             quotes = future_quotes.result()
             floats_dict = future_floats.result()
@@ -671,8 +675,8 @@ def post_screener_realtime(req: RealtimeScreenerRequest):
 
     # 3. Calculate metrics & filter
     results = []
-    max_closes = 10
-    candle_count = min(req.auto_refresh_mins, max_closes) if resolved_interval == "1min" else min(max(1, req.auto_refresh_mins // 5), max_closes)
+    max_closes = max(10, req.recent_mins_window) if resolved_interval == "1min" else max(10, (req.recent_mins_window + 4) // 5)
+    candle_count = min(req.recent_mins_window, max_closes) if resolved_interval == "1min" else min(max(1, req.recent_mins_window // 5), max_closes)
 
     for ticker in tickers:
         quote = quotes_dict.get(ticker, {})
@@ -732,7 +736,7 @@ def post_screener_realtime(req: RealtimeScreenerRequest):
             "Gap (%)": round(gap_pct, 2),
             "Gainer (%)": round(changes_pct, 2),
             "開盤到目前漲幅 (%)": round(intraday_pct, 2),
-            f"最近{req.auto_refresh_mins}分鐘最大漲幅 (%)": round(recent_candle_pct, 2),
+            f"最近{req.recent_mins_window}分鐘最大漲幅 (%)": round(recent_candle_pct, 2),
             "Market Cap (M)": round(mc_m, 2) if mc_m > 0 else None,
             "Float (M)": round(float_m, 2) if float_m > 0 else None,
             "達標 Signal": "✅" if is_passed else "❌",
