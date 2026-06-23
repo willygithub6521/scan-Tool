@@ -219,6 +219,15 @@ class RealtimeScreenerRequest(BaseModel):
     max_mc_m: float = 5000.0
     min_float_m: float = 0.0
     max_float_m: float = 500.0
+    min_price: float = 0.0
+    max_price: float = 0.0
+    filter_price: bool = True
+    filter_gap: bool = True
+    filter_gainer: bool = True
+    filter_intraday: bool = True
+    filter_interval: bool = True
+    filter_mc: bool = True
+    filter_float: bool = True
     strict_filter: bool = True
     watchlist: Dict[str, Any] = {}  # Frontend state passed to keep API stateless
     lightweight: bool = False
@@ -694,10 +703,12 @@ def post_screener_realtime(req: RealtimeScreenerRequest):
         float_m = float_shares / 1e6 if float_shares else 0
 
         prev_candle_closes = closes_data.get(ticker, [])
+        # Reverse from newest-first to oldest-first (chronological) for sliding window
+        prev_candle_closes = prev_candle_closes[::-1]
         
         # Calculate dynamic window returns
         if session == "regular":
-            completed_count = max(1, candle_count - 1)
+            completed_count = candle_count
             active_closes = prev_candle_closes[-completed_count:] + [price]
         else:
             window_size = max(2, candle_count)
@@ -712,20 +723,27 @@ def post_screener_realtime(req: RealtimeScreenerRequest):
             recent_candle_pct = 0.0
 
         # Filter criteria
-        cond_gap = gap_pct >= req.min_gap
-        cond_gainer = changes_pct >= req.min_gainer
-        cond_intraday = intraday_pct >= req.min_intraday
-        cond_5min = recent_candle_pct >= req.min_interval_pct
+        cond_gap = (gap_pct >= req.min_gap) if req.filter_gap else True
+        cond_gainer = (changes_pct >= req.min_gainer) if req.filter_gainer else True
+        cond_intraday = (intraday_pct >= req.min_intraday) if req.filter_intraday else True
+        cond_5min = (recent_candle_pct >= req.min_interval_pct) if req.filter_interval else True
 
         cond_mc = True
-        if req.min_mc_m > 0: cond_mc = cond_mc and (mc_m >= req.min_mc_m)
-        if req.max_mc_m > 0: cond_mc = cond_mc and (mc_m <= req.max_mc_m)
+        if req.filter_mc:
+            if req.min_mc_m > 0: cond_mc = cond_mc and (mc_m >= req.min_mc_m)
+            if req.max_mc_m > 0: cond_mc = cond_mc and (mc_m <= req.max_mc_m)
 
         cond_float = True
-        if req.min_float_m > 0: cond_float = cond_float and (float_m >= req.min_float_m)
-        if req.max_float_m > 0: cond_float = cond_float and (float_m <= req.max_float_m)
+        if req.filter_float:
+            if req.min_float_m > 0: cond_float = cond_float and (float_m >= req.min_float_m)
+            if req.max_float_m > 0: cond_float = cond_float and (float_m <= req.max_float_m)
 
-        is_passed = cond_gap and cond_gainer and cond_intraday and cond_5min and cond_mc and cond_float
+        cond_price = True
+        if req.filter_price:
+            if req.min_price > 0: cond_price = cond_price and (price >= req.min_price)
+            if req.max_price > 0: cond_price = cond_price and (price <= req.max_price)
+
+        is_passed = cond_gap and cond_gainer and cond_intraday and cond_5min and cond_mc and cond_float and cond_price
 
         if req.strict_filter and not is_passed:
             continue

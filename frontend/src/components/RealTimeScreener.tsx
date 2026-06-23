@@ -210,6 +210,15 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
       max_mc_m: maxMktCap,
       min_float_m: minFloat,
       max_float_m: maxFloat,
+      min_price: minPrice,
+      max_price: maxPrice,
+      filter_price: filterPrice,
+      filter_gap: filterGap,
+      filter_gainer: filterGainer,
+      filter_intraday: filterIntraday,
+      filter_interval: filterInterval,
+      filter_mc: filterMktCap,
+      filter_float: filterFloat,
       strict_filter: false, // Force false so backend returns all candidates for local filtering
       watchlist: watchlistRef.current,
       lightweight: isLightweight

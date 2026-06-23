@@ -526,6 +526,8 @@ def render_page():
         
         # Suggestion 3: Fetch minimum close in last 10 candles, compute max return
         prev_candle_closes = closes_dict.get(ticker, [])
+        # Reverse from newest-first to oldest-first (chronological) for sliding window
+        prev_candle_closes = prev_candle_closes[::-1]
         
         # Calculate dynamic window sizes
         if resolved_interval == "1min":
@@ -536,7 +538,7 @@ def render_page():
         session = get_market_session()
         if session == "regular":
             # In regular hours, we slide the window: we need completed_count completed candles + 1 active price
-            completed_count = max(1, candle_count - 1)
+            completed_count = candle_count
             active_closes = prev_candle_closes[-completed_count:] + [price]
         else:
             # In non-regular hours, closes_list already contains the latest price at the end.
