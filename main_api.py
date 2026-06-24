@@ -61,6 +61,7 @@ SCREENER_CACHE: Dict[str, Any] = {
 LAST_SCREENER_REQUEST: Optional["RealtimeScreenerRequest"] = None
 PREWARM_EXECUTION_TIME: float = 0.0
 PREWARM_TIMESTAMP: Optional[datetime.datetime] = None
+PREWARM_STATUS: str = "idle"  # 三種狀態: "idle" | "warming" | "ready"
 
 # Ticker-level individual floats cache
 GLOBAL_FLOATS_CACHE: Dict[str, float] = {}
@@ -87,7 +88,7 @@ def get_floats_optimized(key: str, tickers: List[str]) -> Dict[str, float]:
     return result
 
 def background_prewarm_thread():
-    global LAST_SCREENER_REQUEST, PREWARM_EXECUTION_TIME, PREWARM_TIMESTAMP, SCREENER_CACHE
+    global LAST_SCREENER_REQUEST, PREWARM_EXECUTION_TIME, PREWARM_TIMESTAMP, SCREENER_CACHE, PREWARM_STATUS
     import threading
     from data_fetcher import get_realtime_biggest_gainers, get_realtime_quotes, get_realtime_1min_closes, get_realtime_5min_closes
     
@@ -105,54 +106,63 @@ def background_prewarm_thread():
                     continue
                 
                 print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Triggering background cache pre-warm...", flush=True)
+                PREWARM_STATUS = "warming"
                 start_t = time.time()
-                
-                # 1. Fetch gainers
-                gainers = get_realtime_biggest_gainers(key)
-                if not gainers:
-                    continue
-                tickers = [item['symbol'] for item in gainers if 'symbol' in item]
-                
-                # 2. Resolve interval
-                resolved_interval = "5min"
-                if "Auto" in req.intraday_interval:
-                    resolved_interval = "1min" if req.recent_mins_window < 5 else "5min"
-                elif "1min" in req.intraday_interval:
-                    resolved_interval = "1min"
-                else:
-                    resolved_interval = "5min"
-                
-                from_date = pd.Timestamp.now('US/Eastern').strftime('%Y-%m-%d') if req.today_only else ""
-                
-                # 3. Concurrent fetch quotes, floats (optimized), closes
-                limit_val = max(10, req.recent_mins_window) if resolved_interval == "1min" else max(10, (req.recent_mins_window + 4) // 5)
-                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                    future_quotes = executor.submit(get_realtime_quotes, key, tickers)
-                    future_floats = executor.submit(get_floats_optimized, key, tickers)
-                    if resolved_interval == "1min":
-                        future_closes = executor.submit(get_realtime_1min_closes, key, tickers, from_date, req.extended_hours, limit_val)
-                    else:
-                        future_closes = executor.submit(get_realtime_5min_closes, key, tickers, from_date, req.extended_hours, limit_val)
+                try:
+                    # 1. Fetch gainers
+                    gainers = get_realtime_biggest_gainers(key)
+                    if not gainers:
+                        print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Pre-warm skipped: no gainers returned.", flush=True)
+                        PREWARM_STATUS = "finish"
+                        time.sleep(2)
+                        continue
+                    tickers = [item['symbol'] for item in gainers if 'symbol' in item]
                     
-                    quotes = future_quotes.result()
-                    floats_dict = future_floats.result()
-                    closes_data = future_closes.result()
-                
-                # 4. Save to global cache
-                cache_key = f"{req.intraday_interval}_{req.today_only}_{req.extended_hours}_{req.auto_refresh_mins}_{req.recent_mins_window}"
-                SCREENER_CACHE["cache_key"] = cache_key
-                SCREENER_CACHE["gainers"] = gainers
-                SCREENER_CACHE["floats"] = floats_dict
-                SCREENER_CACHE["closes"] = closes_data
-                SCREENER_CACHE["updated_at"] = datetime.datetime.now()
-                
-                end_t = time.time()
-                PREWARM_EXECUTION_TIME = end_t - start_t
-                PREWARM_TIMESTAMP = SCREENER_CACHE["updated_at"]
-                
-                print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Pre-warm completed in {PREWARM_EXECUTION_TIME:.3f} seconds.", flush=True)
+                    # 2. Resolve interval
+                    resolved_interval = "5min"
+                    if "Auto" in req.intraday_interval:
+                        resolved_interval = "1min" if req.recent_mins_window < 5 else "5min"
+                    elif "1min" in req.intraday_interval:
+                        resolved_interval = "1min"
+                    else:
+                        resolved_interval = "5min"
+                    
+                    from_date = pd.Timestamp.now('US/Eastern').strftime('%Y-%m-%d') if req.today_only else ""
+                    
+                    # 3. Concurrent fetch quotes, floats (optimized), closes
+                    limit_val = max(10, req.recent_mins_window) if resolved_interval == "1min" else max(10, (req.recent_mins_window + 4) // 5)
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                        future_quotes = executor.submit(get_realtime_quotes, key, tickers)
+                        future_floats = executor.submit(get_floats_optimized, key, tickers)
+                        if resolved_interval == "1min":
+                            future_closes = executor.submit(get_realtime_1min_closes, key, tickers, from_date, req.extended_hours, limit_val)
+                        else:
+                            future_closes = executor.submit(get_realtime_5min_closes, key, tickers, from_date, req.extended_hours, limit_val)
+                        
+                        quotes = future_quotes.result()
+                        floats_dict = future_floats.result()
+                        closes_data = future_closes.result()
+                    
+                    # 4. Save to global cache
+                    cache_key = f"{req.intraday_interval}_{req.today_only}_{req.extended_hours}_{req.auto_refresh_mins}_{req.recent_mins_window}"
+                    SCREENER_CACHE["cache_key"] = cache_key
+                    SCREENER_CACHE["gainers"] = gainers
+                    SCREENER_CACHE["floats"] = floats_dict
+                    SCREENER_CACHE["closes"] = closes_data
+                    SCREENER_CACHE["updated_at"] = datetime.datetime.now()
+                    
+                    end_t = time.time()
+                    PREWARM_EXECUTION_TIME = end_t - start_t
+                    PREWARM_TIMESTAMP = SCREENER_CACHE["updated_at"]
+                    
+                    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Pre-warm completed in {PREWARM_EXECUTION_TIME:.3f} seconds. Status: warming -> ready", flush=True)
+                    PREWARM_STATUS = "ready"
+                except Exception as inner_e:
+                    PREWARM_STATUS = "idle"
+                    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Pre-warm failed: {inner_e}. Status: warming -> idle", flush=True)
                 time.sleep(2)  # Avoid double trigger within the same second
         except Exception as e:
+            PREWARM_STATUS = "idle"
             print(f"Exception in pre-warm thread: {e}", flush=True)
 
 # Start daemon pre-warm thread
@@ -285,11 +295,22 @@ def get_market_session_status():
 
 @app.get("/api/session")
 def get_session():
+    global PREWARM_STATUS
     now_est = pd.Timestamp.now('US/Eastern')
     return sanitize_value({
         "session": get_market_session_status(),
-        "est_time": now_est.strftime("%Y-%m-%d %H:%M:%S")
+        "est_time": now_est.strftime("%Y-%m-%d %H:%M:%S"),
+        "prewarm_status": PREWARM_STATUS
     })
+
+@app.post("/api/session/consume")
+def consume_prewarm():
+    """前端呼叫此 endpoint 通知後端已消費 ready 狀態，轉回 idle"""
+    global PREWARM_STATUS
+    if PREWARM_STATUS == "ready":
+        PREWARM_STATUS = "idle"
+        print("[Session] Prewarm status consumed by frontend: ready -> idle", flush=True)
+    return {"prewarm_status": PREWARM_STATUS}
 
 @app.get("/api/stocks/{ticker}/historical")
 def get_historical(

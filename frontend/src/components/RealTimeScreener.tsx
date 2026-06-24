@@ -140,6 +140,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
   const [fetchTime, setFetchTime] = useState<string>('');
   const [prewarmTime, setPrewarmTime] = useState<number | null>(null);
   const [wasPrewarmed, setWasPrewarmed] = useState<boolean>(false);
+  const [prewarmStatus, setPrewarmStatus] = useState<string>('idle');
 
   // Refs to avoid state staleness in interval loop
   const watchlistRef = useRef<any>({});
@@ -184,6 +185,9 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
       const res = await axios.get(`${BASE_URL}/api/session`);
       setSession(res.data.session);
       setEstTime(res.data.est_time);
+      if (res.data.prewarm_status) {
+        setPrewarmStatus(res.data.prewarm_status);
+      }
     } catch (e) {
       console.error("Failed to fetch session", e);
     }
@@ -299,24 +303,65 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
   });
 
   const lastTriggeredMinRef = useRef<number>(-1);
+  const hasTriggeredLightweightRef = useRef<boolean>(false);
+  const prevPrewarmStatusRef = useRef<string>('idle');       // 追蹤上一次狀態，偵測轉變
+  const mainUpdateCompletedAtRef = useRef<number>(0);        // 主更新完成時間戳，保護輕量更新
 
-  // Handle auto-refresh interval lifecycle (precision updates on 10 seconds mark)
+  // Handle auto-refresh interval lifecycle (state-transition based updates)
   useEffect(() => {
     fetchSession();
 
-    // Set a 1-second interval to check for the start of each minute
-    const activeInterval = setInterval(() => {
-      if (!hasStarted) return; // Do not auto-refresh if monitoring hasn't started yet
+    // 1-second polling interval to detect prewarm state transitions
+    const activeInterval = setInterval(async () => {
+      if (!hasStarted) return;
 
       const now = new Date();
       const currentMin = now.getMinutes();
       const currentSec = now.getSeconds();
 
-      // Trigger when seconds is exactly 10 and it matches the autoRefreshMins interval
-      if (currentSec === 10 && (currentMin % autoRefreshMins === 0) && lastTriggeredMinRef.current !== currentMin) {
-        lastTriggeredMinRef.current = currentMin;
-        fetchSession();
-        latestFetchRadarData.current(true, false); // Trigger full background refresh at 10s mark
+      // Poll session endpoint to check prewarm_status
+      try {
+        const res = await axios.get(`${BASE_URL}/api/session`);
+        setSession(res.data.session);
+        setEstTime(res.data.est_time);
+        const status = res.data.prewarm_status || 'idle';
+        const prevStatus = prevPrewarmStatusRef.current;
+        prevPrewarmStatusRef.current = status;
+        setPrewarmStatus(status);
+
+        // 偵測到 warming -> ready 的狀態轉變，立即觸發主更新
+        if (prevStatus === 'warming' && status === 'ready') {
+          lastTriggeredMinRef.current = currentMin;
+          hasTriggeredLightweightRef.current = false;
+          mainUpdateCompletedAtRef.current = 0; // 重置，等主更新完成後記錄
+          console.log(`[AutoRefresh] warming→ready 偵測到，觸發主更新 at ${now.toLocaleTimeString()}`);
+
+          // 觸發主更新
+          latestFetchRadarData.current(true, false);
+
+          // 通知後端消費 ready 狀態，轉回 idle
+          axios.post(`${BASE_URL}/api/session/consume`).catch(err => {
+            console.warn('[AutoRefresh] consume endpoint 呼叫失敗:', err);
+          });
+
+          // 記錄主更新完成時間（以觸發時間為準）
+          mainUpdateCompletedAtRef.current = Date.now();
+        }
+      } catch (e) {
+        console.error("Interval session fetch failed", e);
+      }
+
+      // 第40秒輕量更新：需距主更新完成超過 15 秒，且本分鐘主更新已觸發
+      if (
+        currentSec === 40 &&
+        !hasTriggeredLightweightRef.current &&
+        lastTriggeredMinRef.current === currentMin &&
+        mainUpdateCompletedAtRef.current > 0 &&
+        (Date.now() - mainUpdateCompletedAtRef.current) > 15000
+      ) {
+        hasTriggeredLightweightRef.current = true;
+        console.log(`[AutoRefresh] 第40秒輕量更新觸發 at ${now.toLocaleTimeString()}`);
+        latestFetchRadarData.current(true, true);
       }
     }, 1000);
 
@@ -566,6 +611,23 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                     <h3 className="font-bold text-white text-base">📡 即時雷達追蹤 (Top Gainer Radar)</h3>
                   </div>
                   <div className="flex items-center space-x-4">
+                    {/* Prewarm 狀態 Badge */}
+                    {prewarmStatus === 'warming' ? (
+                      <span className="text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center space-x-1.5 animate-pulse">
+                        <span className="w-1.5 h-1.5 bg-amber-400 rounded-full"></span>
+                        <span>預熱中…</span>
+                      </span>
+                    ) : prewarmStatus === 'ready' ? (
+                      <span className="text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center space-x-1.5">
+                        <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full"></span>
+                        <span>快取就緒</span>
+                      </span>
+                    ) : (
+                      <span className="text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800/60 text-gray-500 border border-gray-700/50 flex items-center space-x-1.5">
+                        <span className="w-1.5 h-1.5 bg-gray-600 rounded-full"></span>
+                        <span>待機</span>
+                      </span>
+                    )}
                     {fetchTime && (
                       <span className="text-xs text-gray-500 font-semibold flex items-center space-x-1">
                         <Clock size={12} />
