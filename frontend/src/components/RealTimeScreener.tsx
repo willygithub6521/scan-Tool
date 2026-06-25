@@ -371,18 +371,18 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
         if (prevStatus === 'warming' && status === 'ready') {
           lastTriggeredMinRef.current = currentMin;
           hasTriggeredLightweightRef.current = false;
-          mainUpdateCompletedAtRef.current = 0; // 重置觸發保護時間戳，主更新啟動後才記錄
+          mainUpdateCompletedAtRef.current = 0; // 重置觸發保護時間戳
           console.log(`[AutoRefresh] warming→ready 偵測到，觸發主更新 at ${now.toLocaleTimeString()}`);
 
-          // 觸發主更新
-          latestFetchRadarData.current(true, false);
-
-          // 通知後端消費 ready 狀態，轉回 idle
+          // 1. 立即通知後端消費 ready 狀態，轉回 idle（避免重複觸發）
           axios.post(`${BASE_URL}/api/session/consume`).catch(err => {
             console.warn('[AutoRefresh] consume endpoint 呼叫失敗:', err);
           });
 
-          // 記錄主更新觸發時間（作為輕量更新的 15 秒冷卻間隔起點）
+          // 2. 觸發並等待主更新完成
+          await latestFetchRadarData.current(true, false);
+
+          // 3. 記錄主更新真正完成時間（作為輕量更新的 15 秒冷卻間隔起點）
           mainUpdateCompletedAtRef.current = Date.now();
         }
       } catch (e) {
@@ -511,26 +511,24 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
         <div className="flex space-x-4">
           <button
             onClick={() => setActiveSubTab('dashboard')}
-            className={`pb-3 text-sm font-semibold border-b-2 transition-all duration-200 cursor-pointer ${
-              activeSubTab === 'dashboard'
+            className={`pb-3 text-sm font-semibold border-b-2 transition-all duration-200 cursor-pointer ${activeSubTab === 'dashboard'
                 ? 'border-indigo-500 text-indigo-400'
                 : 'border-transparent text-gray-400 hover:text-gray-200'
-            }`}
+              }`}
           >
             📡 雷達監控主面板 (Dashboard)
           </button>
           <button
             onClick={() => setActiveSubTab('settings')}
-            className={`pb-3 text-sm font-semibold border-b-2 transition-all duration-200 cursor-pointer ${
-              activeSubTab === 'settings'
+            className={`pb-3 text-sm font-semibold border-b-2 transition-all duration-200 cursor-pointer ${activeSubTab === 'settings'
                 ? 'border-indigo-500 text-indigo-400'
                 : 'border-transparent text-gray-400 hover:text-gray-200'
-            }`}
+              }`}
           >
             ⚙️ 篩選與過濾設定 (Settings)
           </button>
         </div>
-        
+
         {/* Toggle sub sidebar button */}
         <button
           onClick={() => setShowSubSidebar(prev => !prev)}
@@ -545,90 +543,90 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
         {/* Left Control Column */}
         {showSubSidebar && (
           <div className="xl:col-span-1 bg-gray-950/40 p-6 rounded-2xl border border-gray-800 space-y-6 flex flex-col justify-between max-h-[85vh] overflow-y-auto animate-in slide-in-from-left duration-200">
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center space-x-2 mb-3">
-                <Sliders size={14} className="text-indigo-400" />
-                <span>監控狀態與控制</span>
-              </h3>
-              
-              <div className="space-y-3 bg-gray-900/50 p-4 rounded-xl border border-gray-800 text-xs text-left">
-                <div className="flex justify-between">
-                  <span className="text-gray-500">更新頻率</span>
-                  <span className="font-semibold text-white">{autoRefreshMins} 分鐘</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">計算區間</span>
-                  <span className="font-semibold text-white">{recentMinsWindow} 分鐘</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">K線區間</span>
-                  <span className="font-semibold text-white">{intradayInterval}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">觀察池效期</span>
-                  <span className="font-semibold text-white">{watchlistExpiryMins} 分鐘</span>
-                </div>
-                <div className="border-t border-gray-800 my-2 pt-2">
-                  <span className="text-gray-500 block mb-1">啟用篩選狀態</span>
-                  <div className="flex flex-wrap gap-1">
-                    {filterGap && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">跳空</span>}
-                    {filterGainer && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">即時漲</span>}
-                    {filterIntraday && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">開盤漲</span>}
-                    {filterInterval && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">波動</span>}
-                    {filterMktCap && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">市值</span>}
-                    {filterFloat && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">流通</span>}
-                    {filterPrice && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">股價</span>}
-                    {!filterGap && !filterGainer && !filterIntraday && !filterInterval && !filterMktCap && !filterFloat && !filterPrice && (
-                      <span className="text-amber-400 text-[10px]">無任何篩選條件 (僅顯示)</span>
-                    )}
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center space-x-2 mb-3">
+                  <Sliders size={14} className="text-indigo-400" />
+                  <span>監控狀態與控制</span>
+                </h3>
+
+                <div className="space-y-3 bg-gray-900/50 p-4 rounded-xl border border-gray-800 text-xs text-left">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">更新頻率</span>
+                    <span className="font-semibold text-white">{autoRefreshMins} 分鐘</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">計算區間</span>
+                    <span className="font-semibold text-white">{recentMinsWindow} 分鐘</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">K線區間</span>
+                    <span className="font-semibold text-white">{intradayInterval}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">觀察池效期</span>
+                    <span className="font-semibold text-white">{watchlistExpiryMins} 分鐘</span>
+                  </div>
+                  <div className="border-t border-gray-800 my-2 pt-2">
+                    <span className="text-gray-500 block mb-1">啟用篩選狀態</span>
+                    <div className="flex flex-wrap gap-1">
+                      {filterGap && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">跳空</span>}
+                      {filterGainer && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">即時漲</span>}
+                      {filterIntraday && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">開盤漲</span>}
+                      {filterInterval && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">波動</span>}
+                      {filterMktCap && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">市值</span>}
+                      {filterFloat && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">流通</span>}
+                      {filterPrice && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">股價</span>}
+                      {!filterGap && !filterGainer && !filterIntraday && !filterInterval && !filterMktCap && !filterFloat && !filterPrice && (
+                        <span className="text-amber-400 text-[10px]">無任何篩選條件 (僅顯示)</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
+
+              {/* Quick Toggles */}
+              <div className="space-y-3 pt-4 border-t border-gray-800/80 text-left">
+                <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
+                  <input type="checkbox" checked={strictFilter} onChange={(e) => setStrictFilter(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
+                  <span>僅顯示達標標的 (隱藏未過關)</span>
+                </label>
+                <label className="flex items-center space-x-2 text-sm font-medium text-indigo-400 cursor-pointer">
+                  <input type="checkbox" checked={enableAlerts} onChange={(e) => setEnableAlerts(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
+                  <div className="flex items-center space-x-1.5">
+                    <Bell size={14} className="animate-bounce" />
+                    <span>啟用桌面通知與警示聲</span>
+                  </div>
+                </label>
+              </div>
             </div>
 
-            {/* Quick Toggles */}
-            <div className="space-y-3 pt-4 border-t border-gray-800/80 text-left">
-              <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
-                <input type="checkbox" checked={strictFilter} onChange={(e) => setStrictFilter(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
-                <span>僅顯示達標標的 (隱藏未過關)</span>
-              </label>
-              <label className="flex items-center space-x-2 text-sm font-medium text-indigo-400 cursor-pointer">
-                <input type="checkbox" checked={enableAlerts} onChange={(e) => setEnableAlerts(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
-                <div className="flex items-center space-x-1.5">
-                  <Bell size={14} className="animate-bounce" />
-                  <span>啟用桌面通知與警示聲</span>
-                </div>
-              </label>
+            <div className="space-y-3 pt-6 border-t border-gray-800/80">
+              {activeSubTab === 'dashboard' ? (
+                <button
+                  onClick={handleManualClick}
+                  disabled={isLoading}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800/40 text-white rounded-xl py-3 px-4 font-semibold text-sm shadow-lg shadow-indigo-600/35 transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
+                >
+                  {isLoading ? (
+                    <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  ) : (
+                    <>
+                      <RefreshCw size={16} />
+                      <span>手動更新雷達</span>
+                    </>
+                  )}
+                </button>
+              ) : (
+                <button
+                  onClick={() => setActiveSubTab('dashboard')}
+                  className="w-full bg-gray-800 hover:bg-gray-700 text-white rounded-xl py-3 px-4 font-semibold text-sm transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer border border-gray-700"
+                >
+                  <span>返回監控面板</span>
+                </button>
+              )}
             </div>
           </div>
-
-          <div className="space-y-3 pt-6 border-t border-gray-800/80">
-            {activeSubTab === 'dashboard' ? (
-              <button
-                onClick={handleManualClick}
-                disabled={isLoading}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800/40 text-white rounded-xl py-3 px-4 font-semibold text-sm shadow-lg shadow-indigo-600/35 transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
-              >
-                {isLoading ? (
-                  <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                ) : (
-                  <>
-                    <RefreshCw size={16} />
-                    <span>手動更新雷達</span>
-                  </>
-                )}
-              </button>
-            ) : (
-              <button
-                onClick={() => setActiveSubTab('dashboard')}
-                className="w-full bg-gray-800 hover:bg-gray-700 text-white rounded-xl py-3 px-4 font-semibold text-sm transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer border border-gray-700"
-              >
-                <span>返回監控面板</span>
-              </button>
-            )}
-          </div>
-        </div>
         )}
 
         {/* Right Content Area */}
