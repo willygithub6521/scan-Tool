@@ -113,19 +113,13 @@ def background_prewarm_thread():
                     gainers = get_realtime_biggest_gainers(key)
                     if not gainers:
                         print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Pre-warm skipped: no gainers returned.", flush=True)
-                        PREWARM_STATUS = "finish"
+                        PREWARM_STATUS = "idle"
                         time.sleep(2)
                         continue
                     tickers = [item['symbol'] for item in gainers if 'symbol' in item]
                     
                     # 2. Resolve interval
-                    resolved_interval = "5min"
-                    if "Auto" in req.intraday_interval:
-                        resolved_interval = "1min" if req.recent_mins_window < 5 else "5min"
-                    elif "1min" in req.intraday_interval:
-                        resolved_interval = "1min"
-                    else:
-                        resolved_interval = "5min"
+                    resolved_interval = resolve_interval(req.intraday_interval, req.recent_mins_window)
                     
                     from_date = pd.Timestamp.now('US/Eastern').strftime('%Y-%m-%d') if req.today_only else ""
                     
@@ -274,6 +268,14 @@ class BacktraderRequest(BaseModel):
     tp_pct: float = 15.0
     sl_pct: float = 5.0
     max_hold: int = 1
+
+def resolve_interval(intraday_interval: str, recent_mins_window: int) -> str:
+    """Helper: resolve intraday K-line interval from user config string."""
+    if "Auto" in intraday_interval:
+        return "1min" if recent_mins_window < 5 else "5min"
+    elif "1min" in intraday_interval:
+        return "1min"
+    return "5min"
 
 def get_market_session_status():
     """Helper to detect US Eastern market session"""
@@ -653,13 +655,7 @@ def post_screener_realtime(req: RealtimeScreenerRequest):
         closes_data = SCREENER_CACHE["closes"]
         
         # Resolve interval
-        resolved_interval = "5min"
-        if "Auto" in req.intraday_interval:
-            resolved_interval = "1min" if req.recent_mins_window < 5 else "5min"
-        elif "1min" in req.intraday_interval:
-            resolved_interval = "1min"
-        else:
-            resolved_interval = "5min"
+        resolved_interval = resolve_interval(req.intraday_interval, req.recent_mins_window)
     else:
         # Full path: fetch everything from scratch
         gainers = get_realtime_biggest_gainers(key)
@@ -669,13 +665,7 @@ def post_screener_realtime(req: RealtimeScreenerRequest):
         tickers = [item['symbol'] for item in gainers if 'symbol' in item]
         
         # Resolve interval
-        resolved_interval = "5min"
-        if "Auto" in req.intraday_interval:
-            resolved_interval = "1min" if req.recent_mins_window < 5 else "5min"
-        elif "1min" in req.intraday_interval:
-            resolved_interval = "1min"
-        else:
-            resolved_interval = "5min"
+        resolved_interval = resolve_interval(req.intraday_interval, req.recent_mins_window)
 
         from_date = pd.Timestamp.now('US/Eastern').strftime('%Y-%m-%d') if req.today_only else ""
 

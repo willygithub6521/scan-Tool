@@ -15,6 +15,45 @@ interface RealTimeScreenerProps {
   BASE_URL: string;
 }
 
+// ─── Reusable filter row component (used 7× in Settings tab) ───────────────
+interface FilterToggleRowProps {
+  title: string;
+  description: string;
+  isActive: boolean;
+  onToggle: (val: boolean) => void;
+  isFirst?: boolean;
+  children: React.ReactNode;
+}
+
+const FilterToggleRow: React.FC<FilterToggleRowProps> = ({
+  title, description, isActive, onToggle, isFirst = false, children
+}) => (
+  <div className={`flex flex-col lg:flex-row lg:items-center lg:justify-between ${isFirst ? 'pt-4 first:pt-0' : 'pt-6'} gap-4`}>
+    <div className="space-y-1 max-w-md text-left">
+      <span className="font-bold text-sm text-white block">{title}</span>
+      <span className="text-[11px] text-gray-500 block">{description}</span>
+    </div>
+    <div className="flex flex-wrap items-center gap-4">
+      <div className="flex bg-gray-900 border border-gray-800 p-0.5 rounded-xl text-xs">
+        <button
+          onClick={() => onToggle(true)}
+          className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${isActive ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}
+        >
+          🔥 加入篩選
+        </button>
+        <button
+          onClick={() => onToggle(false)}
+          className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${!isActive ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+        >
+          👁️ 僅顯示不篩選
+        </button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
+// ────────────────────────────────────────────────────────────────────────────
+
 export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE_URL }) => {
   // Session status
   const [session, setSession] = useState<string>('closed');
@@ -309,9 +348,8 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
 
   // Handle auto-refresh interval lifecycle (state-transition based updates)
   useEffect(() => {
-    fetchSession();
-
     // 1-second polling interval to detect prewarm state transitions
+    // (session status is fetched on every tick, so no separate initial call needed)
     const activeInterval = setInterval(async () => {
       if (!hasStarted) return;
 
@@ -333,7 +371,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
         if (prevStatus === 'warming' && status === 'ready') {
           lastTriggeredMinRef.current = currentMin;
           hasTriggeredLightweightRef.current = false;
-          mainUpdateCompletedAtRef.current = 0; // 重置，等主更新完成後記錄
+          mainUpdateCompletedAtRef.current = 0; // 重置觸發保護時間戳，主更新啟動後才記錄
           console.log(`[AutoRefresh] warming→ready 偵測到，觸發主更新 at ${now.toLocaleTimeString()}`);
 
           // 觸發主更新
@@ -344,7 +382,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
             console.warn('[AutoRefresh] consume endpoint 呼叫失敗:', err);
           });
 
-          // 記錄主更新完成時間（以觸發時間為準）
+          // 記錄主更新觸發時間（作為輕量更新的 15 秒冷卻間隔起點）
           mainUpdateCompletedAtRef.current = Date.now();
         }
       } catch (e) {
@@ -882,274 +920,114 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                 </div>
 
                 <div className="divide-y divide-gray-800/60 space-y-6">
-                  {/* Gap Filter */}
-                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between pt-4 first:pt-0 gap-4">
-                    <div className="space-y-1 max-w-md text-left">
-                      <span className="font-bold text-sm text-white block">開盤跳空幅 (Gap %)</span>
-                      <span className="text-[11px] text-gray-500 block">相較於前一日收盤價的開盤跳空漲幅百分比。</span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-4">
-                      {/* Segmented Control */}
-                      <div className="flex bg-gray-900 border border-gray-800 p-0.5 rounded-xl text-xs">
-                        <button
-                          onClick={() => setFilterGap(true)}
-                          className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${filterGap ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}
-                        >
-                          🔥 加入篩選
-                        </button>
-                        <button
-                          onClick={() => setFilterGap(false)}
-                          className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${!filterGap ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-200'}`}
-                        >
-                          👁️ 僅顯示不篩選
-                        </button>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs text-gray-500">閥值:</span>
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={minGap}
-                          onChange={(e) => setMinGap(Number(e.target.value))}
-                          className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500"
-                        />
-                        <span className="text-xs text-gray-500">%</span>
-                      </div>
-                    </div>
-                  </div>
 
-                  {/* Gainer Filter */}
-                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between pt-6 gap-4">
-                    <div className="space-y-1 max-w-md text-left">
-                      <span className="font-bold text-sm text-white block">即時累計漲幅 (Gainer %)</span>
-                      <span className="text-[11px] text-gray-500 block">相較於前一日收盤價的當前即時最大累計漲幅。</span>
+                  {/* ── Gap Filter ──────────────────────────────────── */}
+                  <FilterToggleRow
+                    title="開盤跳空幅 (Gap %)"
+                    description="相較於前一日收盤價的開盤跳空漲幅百分比。"
+                    isActive={filterGap}
+                    onToggle={setFilterGap}
+                    isFirst
+                  >
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs text-gray-500">閥值:</span>
+                      <input type="number" step="0.1" value={minGap} onChange={(e) => setMinGap(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                      <span className="text-xs text-gray-500">%</span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-4">
-                      <div className="flex bg-gray-900 border border-gray-800 p-0.5 rounded-xl text-xs">
-                        <button
-                          onClick={() => setFilterGainer(true)}
-                          className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${filterGainer ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}
-                        >
-                          🔥 加入篩選
-                        </button>
-                        <button
-                          onClick={() => setFilterGainer(false)}
-                          className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${!filterGainer ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-200'}`}
-                        >
-                          👁️ 僅顯示不篩選
-                        </button>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs text-gray-500">閥值:</span>
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={minGainer}
-                          onChange={(e) => setMinGainer(Number(e.target.value))}
-                          className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500"
-                        />
-                        <span className="text-xs text-gray-500">%</span>
-                      </div>
-                    </div>
-                  </div>
+                  </FilterToggleRow>
 
-                  {/* Intraday Filter */}
-                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between pt-6 gap-4">
-                    <div className="space-y-1 max-w-md text-left">
-                      <span className="font-bold text-sm text-white block">開盤到當前漲幅 (%)</span>
-                      <span className="text-[11px] text-gray-500 block">從今日開盤價到當前價格的漲幅波動。</span>
+                  {/* ── Gainer Filter ────────────────────────────────── */}
+                  <FilterToggleRow
+                    title="即時累計漲幅 (Gainer %)"
+                    description="相較於前一日收盤價的當前即時最大累計漲幅。"
+                    isActive={filterGainer}
+                    onToggle={setFilterGainer}
+                  >
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs text-gray-500">閥值:</span>
+                      <input type="number" step="0.1" value={minGainer} onChange={(e) => setMinGainer(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                      <span className="text-xs text-gray-500">%</span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-4">
-                      <div className="flex bg-gray-900 border border-gray-800 p-0.5 rounded-xl text-xs">
-                        <button
-                          onClick={() => setFilterIntraday(true)}
-                          className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${filterIntraday ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}
-                        >
-                          🔥 加入篩選
-                        </button>
-                        <button
-                          onClick={() => setFilterIntraday(false)}
-                          className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${!filterIntraday ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-200'}`}
-                        >
-                          👁️ 僅顯示不篩選
-                        </button>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs text-gray-500">閥值:</span>
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={minIntraday}
-                          onChange={(e) => setMinIntraday(Number(e.target.value))}
-                          className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500"
-                        />
-                        <span className="text-xs text-gray-500">%</span>
-                      </div>
-                    </div>
-                  </div>
+                  </FilterToggleRow>
 
-                  {/* Interval Filter */}
-                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between pt-6 gap-4">
-                    <div className="space-y-1 max-w-md text-left">
-                      <span className="font-bold text-sm text-white block">最近 {recentMinsWindow} 分鐘最大波動漲幅 (%)</span>
-                      <span className="text-[11px] text-gray-500 block">在設定的最近 {recentMinsWindow} 分鐘內的最高波動上漲幅度。</span>
+                  {/* ── Intraday Filter ──────────────────────────────── */}
+                  <FilterToggleRow
+                    title="開盤到當前漲幅 (%)"
+                    description="從今日開盤價到當前價格的漲幅波動。"
+                    isActive={filterIntraday}
+                    onToggle={setFilterIntraday}
+                  >
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs text-gray-500">閥值:</span>
+                      <input type="number" step="0.1" value={minIntraday} onChange={(e) => setMinIntraday(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                      <span className="text-xs text-gray-500">%</span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-4">
-                      <div className="flex bg-gray-900 border border-gray-800 p-0.5 rounded-xl text-xs">
-                        <button
-                          onClick={() => setFilterInterval(true)}
-                          className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${filterInterval ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}
-                        >
-                          🔥 加入篩選
-                        </button>
-                        <button
-                          onClick={() => setFilterInterval(false)}
-                          className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${!filterInterval ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-200'}`}
-                        >
-                          👁️ 僅顯示不篩選
-                        </button>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs text-gray-500">閥值:</span>
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={minIntervalPct}
-                          onChange={(e) => setMinIntervalPct(Number(e.target.value))}
-                          className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500"
-                        />
-                        <span className="text-xs text-gray-500">%</span>
-                      </div>
-                    </div>
-                  </div>
+                  </FilterToggleRow>
 
-                  {/* Market Cap Filter */}
-                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between pt-6 gap-4">
-                    <div className="space-y-1 max-w-md text-left">
-                      <span className="font-bold text-sm text-white block">市值範圍 (Market Cap, M)</span>
-                      <span className="text-[11px] text-gray-500 block">設定篩選公司的市值區間（以百萬美元 M 為單位）。</span>
+                  {/* ── Interval Filter ──────────────────────────────── */}
+                  <FilterToggleRow
+                    title={`最近 ${recentMinsWindow} 分鐘最大波動漲幅 (%)`}
+                    description={`在設定的最近 ${recentMinsWindow} 分鐘內的最高波動上漲幅度。`}
+                    isActive={filterInterval}
+                    onToggle={setFilterInterval}
+                  >
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs text-gray-500">閥值:</span>
+                      <input type="number" step="0.1" value={minIntervalPct} onChange={(e) => setMinIntervalPct(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                      <span className="text-xs text-gray-500">%</span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-4">
-                      <div className="flex bg-gray-900 border border-gray-800 p-0.5 rounded-xl text-xs">
-                        <button
-                          onClick={() => setFilterMktCap(true)}
-                          className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${filterMktCap ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}
-                        >
-                          🔥 加入篩選
-                        </button>
-                        <button
-                          onClick={() => setFilterMktCap(false)}
-                          className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${!filterMktCap ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-200'}`}
-                        >
-                          👁️ 僅顯示不篩選
-                        </button>
-                      </div>
-                      <div className="flex items-center space-x-2 text-xs">
-                        <span className="text-gray-500">最低:</span>
-                        <input
-                          type="number"
-                          value={minMktCap}
-                          onChange={(e) => setMinMktCap(Number(e.target.value))}
-                          className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500"
-                        />
-                        <span className="text-gray-500">M</span>
-                        <span className="text-gray-500 pl-2">最高:</span>
-                        <input
-                          type="number"
-                          value={maxMktCap}
-                          onChange={(e) => setMaxMktCap(Number(e.target.value))}
-                          className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500"
-                        />
-                        <span className="text-gray-500">M</span>
-                      </div>
-                    </div>
-                  </div>
+                  </FilterToggleRow>
 
-                  {/* Float Filter */}
-                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between pt-6 gap-4">
-                    <div className="space-y-1 max-w-md text-left">
-                      <span className="font-bold text-sm text-white block">流通股數範圍 (Float, M)</span>
-                      <span className="text-[11px] text-gray-500 block">設定篩選公司的流通股數量區間（以百萬股 M 為單位）。</span>
+                  {/* ── Market Cap Filter ────────────────────────────── */}
+                  <FilterToggleRow
+                    title="市值範圍 (Market Cap, M)"
+                    description="設定篩選公司的市值區間（以百萬美元 M 為單位）。"
+                    isActive={filterMktCap}
+                    onToggle={setFilterMktCap}
+                  >
+                    <div className="flex items-center space-x-2 text-xs">
+                      <span className="text-gray-500">最低:</span>
+                      <input type="number" value={minMktCap} onChange={(e) => setMinMktCap(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                      <span className="text-gray-500">M</span>
+                      <span className="text-gray-500 pl-2">最高:</span>
+                      <input type="number" value={maxMktCap} onChange={(e) => setMaxMktCap(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                      <span className="text-gray-500">M</span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-4">
-                      <div className="flex bg-gray-900 border border-gray-800 p-0.5 rounded-xl text-xs">
-                        <button
-                          onClick={() => setFilterFloat(true)}
-                          className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${filterFloat ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}
-                        >
-                          🔥 加入篩選
-                        </button>
-                        <button
-                          onClick={() => setFilterFloat(false)}
-                          className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${!filterFloat ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-200'}`}
-                        >
-                          👁️ 僅顯示不篩選
-                        </button>
-                      </div>
-                      <div className="flex items-center space-x-2 text-xs">
-                        <span className="text-gray-500">最低:</span>
-                        <input
-                          type="number"
-                          value={minFloat}
-                          onChange={(e) => setMinFloat(Number(e.target.value))}
-                          className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500"
-                        />
-                        <span className="text-gray-500">M</span>
-                        <span className="text-gray-500 pl-2">最高:</span>
-                        <input
-                          type="number"
-                          value={maxFloat}
-                          onChange={(e) => setMaxFloat(Number(e.target.value))}
-                          className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500"
-                        />
-                        <span className="text-gray-500">M</span>
-                      </div>
-                    </div>
-                  </div>
+                  </FilterToggleRow>
 
-                  {/* Price Filter */}
-                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between pt-6 gap-4">
-                    <div className="space-y-1 max-w-md text-left">
-                      <span className="font-bold text-sm text-white block">股票價格範圍 ($)</span>
-                      <span className="text-[11px] text-gray-500 block">過濾標的的股價上下限區間。</span>
+                  {/* ── Float Filter ─────────────────────────────────── */}
+                  <FilterToggleRow
+                    title="流通股數範圍 (Float, M)"
+                    description="設定篩選公司的流通股數量區間（以百萬股 M 為單位）。"
+                    isActive={filterFloat}
+                    onToggle={setFilterFloat}
+                  >
+                    <div className="flex items-center space-x-2 text-xs">
+                      <span className="text-gray-500">最低:</span>
+                      <input type="number" value={minFloat} onChange={(e) => setMinFloat(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                      <span className="text-gray-500">M</span>
+                      <span className="text-gray-500 pl-2">最高:</span>
+                      <input type="number" value={maxFloat} onChange={(e) => setMaxFloat(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                      <span className="text-gray-500">M</span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-4">
-                      <div className="flex bg-gray-900 border border-gray-800 p-0.5 rounded-xl text-xs">
-                        <button
-                          onClick={() => setFilterPrice(true)}
-                          className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${filterPrice ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}
-                        >
-                          🔥 加入篩選
-                        </button>
-                        <button
-                          onClick={() => setFilterPrice(false)}
-                          className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${!filterPrice ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-200'}`}
-                        >
-                          👁️ 僅顯示不篩選
-                        </button>
-                      </div>
-                      <div className="flex items-center space-x-2 text-xs">
-                        <span className="text-gray-500">最低:</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={minPrice}
-                          onChange={(e) => setMinPrice(Number(e.target.value))}
-                          className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500"
-                        />
-                        <span className="text-gray-500">$</span>
-                        <span className="text-gray-500 pl-2">最高:</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={maxPrice}
-                          onChange={(e) => setMaxPrice(Number(e.target.value))}
-                          className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500"
-                        />
-                        <span className="text-gray-500">$</span>
-                      </div>
+                  </FilterToggleRow>
+
+                  {/* ── Price Filter ─────────────────────────────────── */}
+                  <FilterToggleRow
+                    title="股票價格範圍 ($)"
+                    description="過濾標的的股價上下限區間。"
+                    isActive={filterPrice}
+                    onToggle={setFilterPrice}
+                  >
+                    <div className="flex items-center space-x-2 text-xs">
+                      <span className="text-gray-500">最低:</span>
+                      <input type="number" step="0.01" value={minPrice} onChange={(e) => setMinPrice(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                      <span className="text-gray-500">$</span>
+                      <span className="text-gray-500 pl-2">最高:</span>
+                      <input type="number" step="0.01" value={maxPrice} onChange={(e) => setMaxPrice(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                      <span className="text-gray-500">$</span>
                     </div>
-                  </div>
+                  </FilterToggleRow>
 
                 </div>
               </div>
