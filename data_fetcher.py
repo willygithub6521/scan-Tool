@@ -285,18 +285,18 @@ class FMPProvider(DataProvider):
                 response = requests.get(url_with_from, timeout=10)
                 if response.status_code == 200:
                     data = response.json()
-                    if isinstance(data, list) and len(data) >= 2:
-                        closes_list = [c['close'] for c in data[1:limit+1]]
-                        return (ticker, closes_list)
+                    if isinstance(data, list) and len(data) >= 1:
+                        candles_list = [{"open": c["open"], "close": c["close"]} for c in data[0:limit]]
+                        return (ticker, candles_list)
                 
                 # Fallback: if from_date was specified but failed to return enough candles, try without it
                 if from_date:
                     response = requests.get(url, timeout=10)
                     if response.status_code == 200:
                         data = response.json()
-                        if isinstance(data, list) and len(data) >= 2:
-                            closes_list = [c['close'] for c in data[1:limit+1]]
-                            return (ticker, closes_list)
+                        if isinstance(data, list) and len(data) >= 1:
+                            candles_list = [{"open": c["open"], "close": c["close"]} for c in data[0:limit]]
+                            return (ticker, candles_list)
             except Exception:
                 pass
             return None
@@ -338,9 +338,10 @@ class FMPProvider(DataProvider):
                 response = requests.get(url_with_from, timeout=10)
                 if response.status_code == 200:
                     data = response.json()
-                    if isinstance(data, list) and len(data) >= 2:
-                        closes_list = [c['close'] for c in data[1:limit+1]]
-                        return (ticker, closes_list)
+                    if isinstance(data, list) and len(data) >= 1:
+                        candles_list = [{"open": c["open"], "close": c["close"]} for c in data[0:limit]]
+                        print(f"[{datetime.datetime.now()}] [fetch_1min_closes] {ticker} latest K-line date: {data[0]['date']}", flush=True)
+                        return (ticker, candles_list)
                 
                 # Fallback: if from_date was specified but failed to return enough candles, try without it
                 if from_date:
@@ -352,9 +353,9 @@ class FMPProvider(DataProvider):
                     response = requests.get(url, timeout=10)
                     if response.status_code == 200:
                         data = response.json()
-                        if isinstance(data, list) and len(data) >= 2:
-                            closes_list = [c['close'] for c in data[1:limit+1]]
-                            return (ticker, closes_list)
+                        if isinstance(data, list) and len(data) >= 1:
+                            candles_list = [{"open": c["open"], "close": c["close"]} for c in data[0:limit]]
+                            return (ticker, candles_list)
             except Exception:
                 pass
             return None

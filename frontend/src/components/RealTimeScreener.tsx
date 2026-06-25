@@ -260,18 +260,18 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
   };
 
   // Fetch session status
-  const fetchSession = async () => {
-    try {
-      const res = await axios.get(`${BASE_URL}/api/session`);
-      setSession(res.data.session);
-      setEstTime(res.data.est_time);
-      if (res.data.prewarm_status) {
-        setPrewarmStatus(res.data.prewarm_status);
-      }
-    } catch (e) {
-      console.error("Failed to fetch session", e);
-    }
-  };
+  // const fetchSession = async () => {
+  //   try {
+  //     const res = await axios.get(`${BASE_URL}/api/session`);
+  //     setSession(res.data.session);
+  //     setEstTime(res.data.est_time);
+  //     if (res.data.prewarm_status) {
+  //       setPrewarmStatus(res.data.prewarm_status);
+  //     }
+  //   } catch (e) {
+  //     console.error("Failed to fetch session", e);
+  //   }
+  // };
 
   // Primary data fetching
   const handleFetchRadarData = async (isBackground: boolean = false, isLightweight: boolean = false) => {
@@ -553,8 +553,8 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
           <button
             onClick={() => setActiveSubTab('dashboard')}
             className={`pb-3 text-sm font-semibold border-b-2 transition-all duration-200 cursor-pointer ${activeSubTab === 'dashboard'
-                ? 'border-indigo-500 text-indigo-400'
-                : 'border-transparent text-gray-400 hover:text-gray-200'
+              ? 'border-indigo-500 text-indigo-400'
+              : 'border-transparent text-gray-400 hover:text-gray-200'
               }`}
           >
             📡 雷達監控主面板 (Dashboard)
@@ -562,8 +562,8 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
           <button
             onClick={() => setActiveSubTab('settings')}
             className={`pb-3 text-sm font-semibold border-b-2 transition-all duration-200 cursor-pointer ${activeSubTab === 'settings'
-                ? 'border-indigo-500 text-indigo-400'
-                : 'border-transparent text-gray-400 hover:text-gray-200'
+              ? 'border-indigo-500 text-indigo-400'
+              : 'border-transparent text-gray-400 hover:text-gray-200'
               }`}
           >
             ⚙️ 篩選與過濾設定 (Settings)

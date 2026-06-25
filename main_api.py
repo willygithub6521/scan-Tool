@@ -713,25 +713,32 @@ def post_screener_realtime(req: RealtimeScreenerRequest):
         float_shares = floats_dict.get(ticker, 0)
         float_m = float_shares / 1e6 if float_shares else 0
 
-        prev_candle_closes = closes_data.get(ticker, [])
+        prev_candles = closes_data.get(ticker, [])
         # Reverse from newest-first to oldest-first (chronological) for sliding window
-        prev_candle_closes = prev_candle_closes[::-1]
+        prev_candles = prev_candles[::-1]
         
         # Calculate dynamic window returns
+        # Each candle is {"open": ..., "close": ...}
+        # max gain = (current_price - min_entry) / min_entry * 100
+        # where min_entry = min of all opens and closes across the window
         if session == "regular":
             completed_count = candle_count
-            active_closes = prev_candle_closes[-completed_count:] + [price]
+            window_candles = prev_candles[-completed_count:]
+            # Collect all open and close prices in window + live price as the exit
+            all_prices = [c["open"] for c in window_candles] + [c["close"] for c in window_candles] + [price]
         else:
             window_size = max(2, candle_count)
-            active_closes = prev_candle_closes[-window_size:]
-            if active_closes:
-                price = active_closes[-1]
+            window_candles = prev_candles[-window_size:]
+            if window_candles:
+                price = window_candles[-1]["close"]
+            all_prices = [c["open"] for c in window_candles] + [c["close"] for c in window_candles]
 
-        if active_closes:
-            min_close = min(active_closes)
-            recent_candle_pct = ((price / min_close - 1) * 100) if min_close > 0 else 0.0
+        if all_prices:
+            min_entry = min(p for p in all_prices if p > 0) if any(p > 0 for p in all_prices) else 0
+            recent_candle_pct = ((price / min_entry - 1) * 100) if min_entry > 0 else 0.0
         else:
             recent_candle_pct = 0.0
+
 
         # Filter criteria
         cond_gap = (gap_pct >= req.min_gap) if req.filter_gap else True
