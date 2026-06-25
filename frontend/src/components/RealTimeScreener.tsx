@@ -54,6 +54,47 @@ const FilterToggleRow: React.FC<FilterToggleRowProps> = ({
 );
 // ────────────────────────────────────────────────────────────────────────────
 
+// ─── NumericInput: prevents React forcing 0 when input is cleared ────────────
+interface NumericInputProps {
+  value: number;
+  onChange: (val: number) => void;
+  step?: number;
+  min?: number;
+  className?: string;
+  placeholder?: string;
+}
+
+const NumericInput: React.FC<NumericInputProps> = ({
+  value, onChange, step, min, className, placeholder
+}) => {
+  // Local string buffer lets the user freely clear/type without React snapping back to 0
+  const [localVal, setLocalVal] = React.useState(String(value));
+
+  // Sync when external state changes (e.g. reset)
+  React.useEffect(() => {
+    setLocalVal(String(value));
+  }, [value]);
+
+  return (
+    <input
+      type="number"
+      step={step}
+      min={min}
+      placeholder={placeholder}
+      value={localVal}
+      onChange={(e) => setLocalVal(e.target.value)}
+      onBlur={() => {
+        const parsed = parseFloat(localVal);
+        const committed = isNaN(parsed) ? 0 : parsed;
+        setLocalVal(String(committed));
+        onChange(committed);
+      }}
+      className={className}
+    />
+  );
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE_URL }) => {
   // Session status
   const [session, setSession] = useState<string>('closed');
@@ -829,24 +870,22 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   <div className="space-y-2">
                     <label className="text-xs font-semibold text-gray-400">更新頻率 (分鐘)</label>
-                    <input
-                      type="number"
+                    <NumericInput
                       value={autoRefreshMins}
-                      onChange={(e) => setAutoRefreshMins(Number(e.target.value))}
-                      className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                      onChange={setAutoRefreshMins}
                       min={1}
+                      className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
                     />
                     <p className="text-[10px] text-gray-500">定義即時雷達背景自動更新的週期。</p>
                   </div>
 
                   <div className="space-y-2">
                     <label className="text-xs font-semibold text-gray-400">最近漲幅計算區間 (分鐘)</label>
-                    <input
-                      type="number"
+                    <NumericInput
                       value={recentMinsWindow}
-                      onChange={(e) => setRecentMinsWindow(Number(e.target.value))}
-                      className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                      onChange={setRecentMinsWindow}
                       min={1}
+                      className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
                     />
                     <p className="text-[10px] text-gray-500">定義計算最近波動的最大漲幅區間。</p>
                   </div>
@@ -867,12 +906,11 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
 
                   <div className="space-y-2">
                     <label className="text-xs font-semibold text-gray-400">觀察池保留時間 (分鐘)</label>
-                    <input
-                      type="number"
+                    <NumericInput
                       value={watchlistExpiryMins}
-                      onChange={(e) => setWatchlistExpiryMins(Number(e.target.value))}
-                      className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                      onChange={setWatchlistExpiryMins}
                       min={1}
+                      className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
                     />
                     <p className="text-[10px] text-gray-500">股票觸發達標後，在拉回觀察池中的保留期限。</p>
                   </div>
@@ -929,7 +967,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                   >
                     <div className="flex items-center space-x-2">
                       <span className="text-xs text-gray-500">閥值:</span>
-                      <input type="number" step="0.1" value={minGap} onChange={(e) => setMinGap(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                      <NumericInput step={0.1} value={minGap} onChange={setMinGap} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
                       <span className="text-xs text-gray-500">%</span>
                     </div>
                   </FilterToggleRow>
@@ -943,7 +981,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                   >
                     <div className="flex items-center space-x-2">
                       <span className="text-xs text-gray-500">閥值:</span>
-                      <input type="number" step="0.1" value={minGainer} onChange={(e) => setMinGainer(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                      <NumericInput step={0.1} value={minGainer} onChange={setMinGainer} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
                       <span className="text-xs text-gray-500">%</span>
                     </div>
                   </FilterToggleRow>
@@ -957,7 +995,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                   >
                     <div className="flex items-center space-x-2">
                       <span className="text-xs text-gray-500">閥值:</span>
-                      <input type="number" step="0.1" value={minIntraday} onChange={(e) => setMinIntraday(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                      <NumericInput step={0.1} value={minIntraday} onChange={setMinIntraday} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
                       <span className="text-xs text-gray-500">%</span>
                     </div>
                   </FilterToggleRow>
@@ -971,7 +1009,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                   >
                     <div className="flex items-center space-x-2">
                       <span className="text-xs text-gray-500">閥值:</span>
-                      <input type="number" step="0.1" value={minIntervalPct} onChange={(e) => setMinIntervalPct(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                      <NumericInput step={0.1} value={minIntervalPct} onChange={setMinIntervalPct} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
                       <span className="text-xs text-gray-500">%</span>
                     </div>
                   </FilterToggleRow>
@@ -985,10 +1023,10 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                   >
                     <div className="flex items-center space-x-2 text-xs">
                       <span className="text-gray-500">最低:</span>
-                      <input type="number" value={minMktCap} onChange={(e) => setMinMktCap(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                      <NumericInput value={minMktCap} onChange={setMinMktCap} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
                       <span className="text-gray-500">M</span>
                       <span className="text-gray-500 pl-2">最高:</span>
-                      <input type="number" value={maxMktCap} onChange={(e) => setMaxMktCap(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                      <NumericInput value={maxMktCap} onChange={setMaxMktCap} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
                       <span className="text-gray-500">M</span>
                     </div>
                   </FilterToggleRow>
@@ -1002,10 +1040,10 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                   >
                     <div className="flex items-center space-x-2 text-xs">
                       <span className="text-gray-500">最低:</span>
-                      <input type="number" value={minFloat} onChange={(e) => setMinFloat(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                      <NumericInput value={minFloat} onChange={setMinFloat} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
                       <span className="text-gray-500">M</span>
                       <span className="text-gray-500 pl-2">最高:</span>
-                      <input type="number" value={maxFloat} onChange={(e) => setMaxFloat(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                      <NumericInput value={maxFloat} onChange={setMaxFloat} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
                       <span className="text-gray-500">M</span>
                     </div>
                   </FilterToggleRow>
@@ -1019,10 +1057,10 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                   >
                     <div className="flex items-center space-x-2 text-xs">
                       <span className="text-gray-500">最低:</span>
-                      <input type="number" step="0.01" value={minPrice} onChange={(e) => setMinPrice(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                      <NumericInput step={0.01} value={minPrice} onChange={setMinPrice} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
                       <span className="text-gray-500">$</span>
                       <span className="text-gray-500 pl-2">最高:</span>
-                      <input type="number" step="0.01" value={maxPrice} onChange={(e) => setMaxPrice(Number(e.target.value))} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                      <NumericInput step={0.01} value={maxPrice} onChange={setMaxPrice} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
                       <span className="text-gray-500">$</span>
                     </div>
                   </FilterToggleRow>
