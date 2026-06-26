@@ -27,8 +27,8 @@ from data_fetcher import (
     get_realtime_biggest_gainers,
     get_realtime_quotes,
     get_floats,
-    get_realtime_5min_closes,
-    get_realtime_1min_closes,
+    get_realtime_5min_closes,   # [DEPRECATED] kept for /api/screener/realtime backward compat
+    get_realtime_1min_closes,   # [DEPRECATED] kept for /api/screener/realtime backward compat
     get_intraday_data
 )
 from indicators import add_sma
@@ -48,7 +48,27 @@ app.add_middleware(
 # Global in-memory cache for raw historical DataFrames to avoid redundant FMP/Yahoo API requests
 RAW_DATA_CACHE: Dict[str, pd.DataFrame] = {}
 
-# Global in-memory cache for real-time screener to support lightweight updates
+# ─── Batch-Quote Ring Buffer Architecture ─────────────────────────────────────
+from collections import defaultdict, deque
+
+# Per-ticker ring buffer of (timestamp, price) tuples sampled every 5 seconds.
+# maxlen=360 retains up to 30 minutes of data at 12 samples/min.
+PRICE_BUFFER: Dict[str, deque] = defaultdict(lambda: deque(maxlen=360))
+
+# Cache for the Top Gainers list (updated every autoRefreshMins by background thread)
+GAINERS_CACHE: Dict[str, Any] = {
+    "tickers": [],       # list[str] of symbols
+    "gainers_raw": [],   # full raw gainers response from FMP
+    "updated_at": None   # datetime of last refresh
+}
+
+# Last known API key (set on each /api/screener/tick call, used by background thread)
+LAST_API_KEY: str = ""
+# Last autoRefreshMins setting (used to control gainers refresh interval)
+LAST_AUTO_REFRESH_MINS: int = 1
+# ─────────────────────────────────────────────────────────────────────────────
+
+# [DEPRECATED] Legacy SCREENER_CACHE kept for /api/screener/realtime backward compat
 SCREENER_CACHE: Dict[str, Any] = {
     "cache_key": "",
     "gainers": [],
@@ -56,12 +76,6 @@ SCREENER_CACHE: Dict[str, Any] = {
     "closes": {},
     "updated_at": None
 }
-
-# Global state for cache pre-warming
-LAST_SCREENER_REQUEST: Optional["RealtimeScreenerRequest"] = None
-PREWARM_EXECUTION_TIME: float = 0.0
-PREWARM_TIMESTAMP: Optional[datetime.datetime] = None
-PREWARM_STATUS: str = "idle"  # 三種狀態: "idle" | "warming" | "ready"
 
 # Ticker-level individual floats cache
 GLOBAL_FLOATS_CACHE: Dict[str, float] = {}
@@ -87,81 +101,55 @@ def get_floats_optimized(key: str, tickers: List[str]) -> Dict[str, float]:
             
     return result
 
-def background_prewarm_thread():
-    global LAST_SCREENER_REQUEST, PREWARM_EXECUTION_TIME, PREWARM_TIMESTAMP, SCREENER_CACHE, PREWARM_STATUS
-    import threading
-    from data_fetcher import get_realtime_biggest_gainers, get_realtime_quotes, get_realtime_1min_closes, get_realtime_5min_closes
+def background_gainers_refresh_thread():
+    """Background daemon: refreshes Top Gainers list + floats every autoRefreshMins minutes.
     
-    print("Background pre-warm thread started.", flush=True)
-    
+    This is the simplified replacement for the old prewarm thread. It no longer fetches
+    K-line data or manages a warming/ready state machine. The frontend drives tick updates
+    directly every 5 seconds via /api/screener/tick.
+    """
+    global GAINERS_CACHE, GLOBAL_FLOATS_CACHE, LAST_API_KEY, LAST_AUTO_REFRESH_MINS
+
+    print("Background gainers refresh thread started.", flush=True)
+
     while True:
         try:
             time.sleep(1)
             now = datetime.datetime.now()
-            # Run at exactly 3 seconds boundary to allow the previous minute's candle to finalize
-            if now.second == 3 and LAST_SCREENER_REQUEST is not None:
-                req = LAST_SCREENER_REQUEST
-                key = req.fmp_api_key or os.environ.get("FMP_API_KEY", "")
-                if not key:
-                    continue
-                
-                print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Triggering background cache pre-warm...", flush=True)
-                PREWARM_STATUS = "warming"
-                start_t = time.time()
+            # Refresh at second=3 of every Nth minute (N = autoRefreshMins)
+            refresh_interval_secs = LAST_AUTO_REFRESH_MINS * 60
+            last_updated = GAINERS_CACHE.get("updated_at")
+            secs_since_update = (now - last_updated).total_seconds() if last_updated else 99999
+
+            key = LAST_API_KEY or os.environ.get("FMP_API_KEY", "")
+            should_refresh = (
+                now.second == 3
+                and key
+                and secs_since_update >= refresh_interval_secs
+            )
+
+            if should_refresh:
+                print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Refreshing Top Gainers...", flush=True)
                 try:
-                    # 1. Fetch gainers
                     gainers = get_realtime_biggest_gainers(key)
-                    if not gainers:
-                        print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Pre-warm skipped: no gainers returned.", flush=True)
-                        PREWARM_STATUS = "idle"
-                        time.sleep(2)
-                        continue
-                    tickers = [item['symbol'] for item in gainers if 'symbol' in item]
-                    
-                    # 2. Resolve interval
-                    resolved_interval = resolve_interval(req.intraday_interval, req.recent_mins_window)
-                    
-                    from_date = pd.Timestamp.now('US/Eastern').strftime('%Y-%m-%d') if req.today_only else ""
-                    
-                    # 3. Concurrent fetch quotes, floats (optimized), closes
-                    limit_val = max(10, req.recent_mins_window) if resolved_interval == "1min" else max(10, (req.recent_mins_window + 4) // 5)
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                        future_quotes = executor.submit(get_realtime_quotes, key, tickers)
-                        future_floats = executor.submit(get_floats_optimized, key, tickers)
-                        if resolved_interval == "1min":
-                            future_closes = executor.submit(get_realtime_1min_closes, key, tickers, from_date, req.extended_hours, limit_val)
-                        else:
-                            future_closes = executor.submit(get_realtime_5min_closes, key, tickers, from_date, req.extended_hours, limit_val)
-                        
-                        quotes = future_quotes.result()
-                        floats_dict = future_floats.result()
-                        closes_data = future_closes.result()
-                    
-                    # 4. Save to global cache
-                    cache_key = f"{req.intraday_interval}_{req.today_only}_{req.extended_hours}_{req.auto_refresh_mins}_{req.recent_mins_window}"
-                    SCREENER_CACHE["cache_key"] = cache_key
-                    SCREENER_CACHE["gainers"] = gainers
-                    SCREENER_CACHE["floats"] = floats_dict
-                    SCREENER_CACHE["closes"] = closes_data
-                    SCREENER_CACHE["updated_at"] = datetime.datetime.now()
-                    
-                    end_t = time.time()
-                    PREWARM_EXECUTION_TIME = end_t - start_t
-                    PREWARM_TIMESTAMP = SCREENER_CACHE["updated_at"]
-                    
-                    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Pre-warm completed in {PREWARM_EXECUTION_TIME:.3f} seconds. Status: warming -> ready", flush=True)
-                    PREWARM_STATUS = "ready"
+                    if gainers:
+                        tickers = [g["symbol"] for g in gainers if "symbol" in g]
+                        floats_dict = get_floats_optimized(key, tickers)
+                        GAINERS_CACHE["tickers"] = tickers
+                        GAINERS_CACHE["gainers_raw"] = gainers
+                        GAINERS_CACHE["updated_at"] = now
+                        print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Gainers refreshed: {len(tickers)} tickers.", flush=True)
+                    else:
+                        print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Gainers refresh skipped: no results.", flush=True)
                 except Exception as inner_e:
-                    PREWARM_STATUS = "idle"
-                    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Pre-warm failed: {inner_e}. Status: warming -> idle", flush=True)
+                    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Gainers refresh failed: {inner_e}", flush=True)
                 time.sleep(2)  # Avoid double trigger within the same second
         except Exception as e:
-            PREWARM_STATUS = "idle"
-            print(f"Exception in pre-warm thread: {e}", flush=True)
+            print(f"[GainersRefresh] Exception: {e}", flush=True)
 
-# Start daemon pre-warm thread
+# Start daemon gainers refresh thread
 import threading
-threading.Thread(target=background_prewarm_thread, daemon=True).start()
+threading.Thread(target=background_gainers_refresh_thread, daemon=True).start()
 
 
 def sanitize_value(val):
@@ -208,6 +196,7 @@ class ScanRequest(BaseModel):
     strict_vol_filter: bool = False
 
 class RealtimeScreenerRequest(BaseModel):
+    """[DEPRECATED] Legacy model for /api/screener/realtime. Use RealtimeTickRequest instead."""
     fmp_api_key: Optional[str] = None
     auto_refresh_mins: int = 5
     intraday_interval: str = "Auto (根據更新頻率)"
@@ -235,6 +224,32 @@ class RealtimeScreenerRequest(BaseModel):
     strict_filter: bool = True
     watchlist: Dict[str, Any] = {}  # Frontend state passed to keep API stateless
     lightweight: bool = False
+
+class RealtimeTickRequest(BaseModel):
+    """Request model for /api/screener/tick (5-second batch-quote ring buffer architecture)."""
+    fmp_api_key: Optional[str] = None
+    auto_refresh_mins: int = 1           # Controls how often background gainers list refreshes
+    recent_mins_window: int = 5          # Rolling price window for recent gain calculation
+    watchlist_expiry_mins: int = 15
+    min_gap: float = 0.0
+    min_gainer: float = 5.0
+    min_intraday: float = 0.0
+    min_interval_pct: float = 0.0
+    min_mc_m: float = 0.0
+    max_mc_m: float = 5000.0
+    min_float_m: float = 0.0
+    max_float_m: float = 500.0
+    min_price: float = 0.0
+    max_price: float = 0.0
+    filter_price: bool = True
+    filter_gap: bool = True
+    filter_gainer: bool = True
+    filter_intraday: bool = True
+    filter_interval: bool = True
+    filter_mc: bool = True
+    filter_float: bool = True
+    strict_filter: bool = False
+    watchlist: Dict[str, Any] = {}
 
 class VectorizedBacktestRequest(BaseModel):
     tickers: List[str]
@@ -270,7 +285,7 @@ class BacktraderRequest(BaseModel):
     max_hold: int = 1
 
 def resolve_interval(intraday_interval: str, recent_mins_window: int) -> str:
-    """Helper: resolve intraday K-line interval from user config string."""
+    """[DEPRECATED] Helper for /api/screener/realtime K-line interval resolution."""
     if "Auto" in intraday_interval:
         return "1min" if recent_mins_window < 5 else "5min"
     elif "1min" in intraday_interval:
@@ -297,22 +312,17 @@ def get_market_session_status():
 
 @app.get("/api/session")
 def get_session():
-    global PREWARM_STATUS
     now_est = pd.Timestamp.now('US/Eastern')
+    gainers_updated = GAINERS_CACHE.get("updated_at")
+    gainers_age_secs = int((datetime.datetime.now() - gainers_updated).total_seconds()) if gainers_updated else None
     return sanitize_value({
         "session": get_market_session_status(),
         "est_time": now_est.strftime("%Y-%m-%d %H:%M:%S"),
-        "prewarm_status": PREWARM_STATUS
+        "gainers_count": len(GAINERS_CACHE.get("tickers", [])),
+        "gainers_age_secs": gainers_age_secs,
     })
 
-@app.post("/api/session/consume")
-def consume_prewarm():
-    """前端呼叫此 endpoint 通知後端已消費 ready 狀態，轉回 idle"""
-    global PREWARM_STATUS
-    if PREWARM_STATUS == "ready":
-        PREWARM_STATUS = "idle"
-        print("[Session] Prewarm status consumed by frontend: ready -> idle", flush=True)
-    return {"prewarm_status": PREWARM_STATUS}
+# /api/session/consume has been removed (no longer needed without prewarm state machine)
 
 @app.get("/api/stocks/{ticker}/historical")
 def get_historical(
@@ -621,6 +631,191 @@ def post_scan(req: ScanRequest):
         filtered_results.append(row_dict)
 
     return sanitize_value({"results": filtered_results})
+
+@app.post("/api/screener/tick")
+def post_screener_tick(req: RealtimeTickRequest):
+    """Primary real-time screener endpoint (batch-quote ring buffer architecture).
+    
+    Called by the frontend every 5 seconds. Each call:
+    1. Fetches batch-quote for all gainers + watchlist tickers (1 API call total)
+    2. Appends (timestamp, price) to PRICE_BUFFER for each ticker
+    3. Calculates recent N-minute max gain from the ring buffer
+    4. Updates watchlist (including watchlist-only tickers no longer in gainers)
+    """
+    global LAST_API_KEY, LAST_AUTO_REFRESH_MINS, PRICE_BUFFER
+
+    key = req.fmp_api_key or os.environ.get("FMP_API_KEY", "")
+    if not key:
+        raise HTTPException(status_code=400, detail="FMP API Key is required.")
+
+    # Update API key and refresh interval for the background thread
+    LAST_API_KEY = key
+    LAST_AUTO_REFRESH_MINS = req.auto_refresh_mins
+
+    # 1. Decide tickers: gainers ∪ watchlist (deduped, gainers first)
+    gainers_tickers = list(GAINERS_CACHE.get("tickers", []))
+    gainers_raw = GAINERS_CACHE.get("gainers_raw", [])
+
+    # Cold-start: if gainers cache is empty, fetch immediately and block
+    if not gainers_tickers:
+        print("[Tick] Cold-start: fetching initial gainers synchronously...", flush=True)
+        try:
+            gainers = get_realtime_biggest_gainers(key)
+            if gainers:
+                gainers_tickers = [g["symbol"] for g in gainers if "symbol" in g]
+                gainers_raw = gainers
+                floats_dict = get_floats_optimized(key, gainers_tickers)
+                GAINERS_CACHE["tickers"] = gainers_tickers
+                GAINERS_CACHE["gainers_raw"] = gainers_raw
+                GAINERS_CACHE["updated_at"] = datetime.datetime.now()
+        except Exception as e:
+            print(f"[Tick] Cold-start gainers fetch failed: {e}", flush=True)
+            return sanitize_value({"results": [], "watchlist": req.watchlist, "new_notifications": []})
+
+    watchlist_tickers = list(req.watchlist.keys())
+    # Merge: gainers first, then watchlist-only tickers (preserve order, no duplicates)
+    all_tickers = list(dict.fromkeys(gainers_tickers + watchlist_tickers))
+
+    # 2. Single batch-quote call for all tickers
+    quotes = get_realtime_quotes(key, all_tickers)
+    quotes_dict = {q["symbol"]: q for q in quotes if "symbol" in q}
+
+    # 3. Append price samples to PRICE_BUFFER (ring buffer, auto-trims maxlen=360)
+    ts = time.time()
+    for ticker in all_tickers:
+        q = quotes_dict.get(ticker, {})
+        price = q.get("price", 0)
+        if price and price > 0:
+            PRICE_BUFFER[ticker].append((ts, price))
+
+    # 4. Calculate metrics per ticker and build results
+    session = get_market_session_status()
+    window_secs = req.recent_mins_window * 60
+    results = []
+
+    for ticker in gainers_tickers:  # Only gainers appear in the results table
+        q = quotes_dict.get(ticker, {})
+        price = q.get("price", 0)
+        open_price = q.get("open", 0)
+        prev_close = q.get("previousClose", 0)
+        changes_pct = q.get("changePercentage", 0)
+        market_cap = q.get("marketCap", 0)
+
+        gap_pct = ((open_price / prev_close - 1) * 100) if prev_close and prev_close > 0 else 0
+        intraday_pct = ((price / open_price - 1) * 100) if open_price and open_price > 0 else 0
+        mc_m = market_cap / 1e6 if market_cap else 0
+
+        float_shares = GLOBAL_FLOATS_CACHE.get(ticker, 0)
+        float_m = float_shares / 1e6 if float_shares else 0
+
+        # Calculate recent N-minute max gain from ring buffer
+        cutoff = ts - window_secs
+        buf = PRICE_BUFFER.get(ticker, deque())
+        prices_in_window = [p for t, p in buf if t >= cutoff and p > 0]
+
+        if prices_in_window and price and price > 0:
+            min_price = min(prices_in_window)
+            recent_pct = ((price / min_price) - 1) * 100
+        else:
+            recent_pct = 0.0
+
+        # Filter criteria
+        cond_gap = (gap_pct >= req.min_gap) if req.filter_gap else True
+        cond_gainer = (changes_pct >= req.min_gainer) if req.filter_gainer else True
+        cond_intraday = (intraday_pct >= req.min_intraday) if req.filter_intraday else True
+        cond_interval = (recent_pct >= req.min_interval_pct) if req.filter_interval else True
+
+        cond_mc = True
+        if req.filter_mc:
+            if req.min_mc_m > 0: cond_mc = cond_mc and (mc_m >= req.min_mc_m)
+            if req.max_mc_m > 0: cond_mc = cond_mc and (mc_m <= req.max_mc_m)
+
+        cond_float = True
+        if req.filter_float:
+            if req.min_float_m > 0: cond_float = cond_float and (float_m >= req.min_float_m)
+            if req.max_float_m > 0: cond_float = cond_float and (float_m <= req.max_float_m)
+
+        cond_price = True
+        if req.filter_price:
+            if req.min_price > 0: cond_price = cond_price and (price >= req.min_price)
+            if req.max_price > 0: cond_price = cond_price and (price <= req.max_price)
+
+        is_passed = cond_gap and cond_gainer and cond_intraday and cond_interval and cond_mc and cond_float and cond_price
+
+        if req.strict_filter and not is_passed:
+            continue
+
+        results.append({
+            "Ticker": ticker,
+            "Price": round(price, 2),
+            "Gap (%)": round(gap_pct, 2),
+            "Gainer (%)": round(changes_pct, 2),
+            "開盤到目前漲幅 (%)": round(intraday_pct, 2),
+            f"最近{req.recent_mins_window}分鐘最大漲幅 (%)": round(recent_pct, 2),
+            "Market Cap (M)": round(mc_m, 2) if mc_m > 0 else None,
+            "Float (M)": round(float_m, 2) if float_m > 0 else None,
+            "達標 Signal": "✅" if is_passed else "❌",
+            "_is_passed": is_passed,
+            "_recent_pct": recent_pct
+        })
+
+    # 5. Watchlist updates (gainers + watchlist-only tickers both get max_price updates)
+    now_dt = datetime.datetime.now()
+    watchlist = req.watchlist.copy()
+    new_notifications = []
+
+    for r in results:
+        ticker = r["Ticker"]
+        price = r["Price"]
+        if r["_is_passed"]:
+            if ticker not in watchlist:
+                watchlist[ticker] = {
+                    "trigger_time": now_dt.isoformat(),
+                    "trigger_price": price,
+                    "trigger_pct": r["_recent_pct"],
+                    "max_price_since_trigger": price
+                }
+                new_notifications.append(ticker)
+            else:
+                watchlist[ticker]["max_price_since_trigger"] = max(
+                    watchlist[ticker]["max_price_since_trigger"], price
+                )
+        elif ticker in watchlist:
+            watchlist[ticker]["max_price_since_trigger"] = max(
+                watchlist[ticker]["max_price_since_trigger"], price
+            )
+
+    # Also update max_price for watchlist-only tickers (not in gainers results)
+    for ticker in watchlist_tickers:
+        if ticker not in gainers_tickers:
+            wl_price = quotes_dict.get(ticker, {}).get("price", 0)
+            if wl_price and wl_price > 0 and ticker in watchlist:
+                watchlist[ticker]["max_price_since_trigger"] = max(
+                    watchlist[ticker]["max_price_since_trigger"], wl_price
+                )
+
+    # Delete expired watchlist entries
+    expiry_secs = req.watchlist_expiry_mins * 60
+    expired = [
+        t for t, info in watchlist.items()
+        if (now_dt - datetime.datetime.fromisoformat(info["trigger_time"])).total_seconds() > expiry_secs
+    ]
+    for t in expired:
+        watchlist.pop(t, None)
+
+    # Strip internal fields from results
+    for r in results:
+        r.pop("_is_passed", None)
+        r.pop("_recent_pct", None)
+
+    return sanitize_value({
+        "results": results,
+        "watchlist": watchlist,
+        "new_notifications": new_notifications,
+        "gainers_refreshed_at": GAINERS_CACHE["updated_at"].isoformat() if GAINERS_CACHE.get("updated_at") else None,
+        "buffer_sample_count": {t: len(PRICE_BUFFER[t]) for t in gainers_tickers if t in PRICE_BUFFER}
+    })
+
 
 @app.post("/api/screener/realtime")
 def post_screener_realtime(req: RealtimeScreenerRequest):

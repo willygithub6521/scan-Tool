@@ -116,17 +116,6 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
     const saved = localStorage.getItem('RTS_recentMinsWindow');
     return saved ? Number(saved) : 5;
   });
-  const [intradayInterval, setIntradayInterval] = useState<string>(() => {
-    return localStorage.getItem('RTS_intradayInterval') || 'Auto (根據更新頻率)';
-  });
-  const [todayOnly, setTodayOnly] = useState<boolean>(() => {
-    const saved = localStorage.getItem('RTS_todayOnly');
-    return saved !== null ? saved === 'true' : true;
-  });
-  const [extendedHours, setExtendedHours] = useState<boolean>(() => {
-    const saved = localStorage.getItem('RTS_extendedHours');
-    return saved !== null ? saved === 'true' : true;
-  });
   const [watchlistExpiryMins, setWatchlistExpiryMins] = useState<number>(() => {
     const saved = localStorage.getItem('RTS_watchlistExpiryMins');
     return saved ? Number(saved) : 15;
@@ -218,9 +207,6 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
   const [watchlist, setWatchlist] = useState<Record<string, any>>({});
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [fetchTime, setFetchTime] = useState<string>('');
-  const [prewarmTime, setPrewarmTime] = useState<number | null>(null);
-  const [wasPrewarmed, setWasPrewarmed] = useState<boolean>(false);
-  const [prewarmStatus, setPrewarmStatus] = useState<string>('idle');
 
   // Refs to avoid state staleness in interval loop
   const watchlistRef = useRef<any>({});
@@ -259,22 +245,10 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
     }
   };
 
-  // Fetch session status
-  // const fetchSession = async () => {
-  //   try {
-  //     const res = await axios.get(`${BASE_URL}/api/session`);
-  //     setSession(res.data.session);
-  //     setEstTime(res.data.est_time);
-  //     if (res.data.prewarm_status) {
-  //       setPrewarmStatus(res.data.prewarm_status);
-  //     }
-  //   } catch (e) {
-  //     console.error("Failed to fetch session", e);
-  //   }
-  // };
 
-  // Primary data fetching
-  const handleFetchRadarData = async (isBackground: boolean = false, isLightweight: boolean = false) => {
+
+  // Primary data fetching — calls /api/screener/tick (batch-quote ring buffer architecture)
+  const handleFetchRadarData = async (isBackground: boolean = false) => {
     if (!isBackground) setIsLoading(true);
     setErrorMsg('');
 
@@ -282,9 +256,6 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
       fmp_api_key: apiKey,
       auto_refresh_mins: autoRefreshMins,
       recent_mins_window: recentMinsWindow,
-      intraday_interval: intradayInterval,
-      today_only: todayOnly,
-      extended_hours: extendedHours,
       watchlist_expiry_mins: watchlistExpiryMins,
       min_gap: minGap,
       min_gainer: minGainer,
@@ -303,24 +274,16 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
       filter_interval: filterInterval,
       filter_mc: filterMktCap,
       filter_float: filterFloat,
-      strict_filter: false, // Force false so backend returns all candidates for local filtering
-      watchlist: watchlistRef.current,
-      lightweight: isLightweight
+      strict_filter: false,
+      watchlist: watchlistRef.current
     };
 
     try {
-      const response = await axios.post(`${BASE_URL}/api/screener/realtime`, payload);
+      const response = await axios.post(`${BASE_URL}/api/screener/tick`, payload);
       setResults(response.data.results);
       setWatchlist(response.data.watchlist);
       setFetchTime(new Date().toLocaleTimeString());
-      if (response.data.prewarm_execution_time !== undefined) {
-        setPrewarmTime(response.data.prewarm_execution_time);
-      }
-      if (response.data.prewarmed !== undefined) {
-        setWasPrewarmed(response.data.prewarmed);
-      }
 
-      // Trigger alerts if enabled and newly passed tickers found
       if (enableAlerts && response.data.new_notifications?.length > 0) {
         playDoubleBeep();
         triggerNotification(response.data.new_notifications);
@@ -336,12 +299,9 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
   useEffect(() => {
     localStorage.setItem('RTS_autoRefreshMins', autoRefreshMins.toString());
     localStorage.setItem('RTS_recentMinsWindow', recentMinsWindow.toString());
-    localStorage.setItem('RTS_intradayInterval', intradayInterval);
-    localStorage.setItem('RTS_todayOnly', todayOnly.toString());
-    localStorage.setItem('RTS_extendedHours', extendedHours.toString());
     localStorage.setItem('RTS_watchlistExpiryMins', watchlistExpiryMins.toString());
     localStorage.setItem('RTS_showSubSidebar', showSubSidebar.toString());
-  }, [autoRefreshMins, recentMinsWindow, intradayInterval, todayOnly, extendedHours, watchlistExpiryMins, showSubSidebar]);
+  }, [autoRefreshMins, recentMinsWindow, watchlistExpiryMins, showSubSidebar]);
 
   useEffect(() => {
     localStorage.setItem('RTS_minGap', minGap.toString());
@@ -382,74 +342,31 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
     latestFetchRadarData.current = handleFetchRadarData;
   });
 
-  const lastTriggeredMinRef = useRef<number>(-1);
-  const hasTriggeredLightweightRef = useRef<boolean>(false);
-  const prevPrewarmStatusRef = useRef<string>('idle');       // 追蹤上一次狀態，偵測轉變
-  const mainUpdateCompletedAtRef = useRef<number>(0);        // 主更新完成時間戳，保護輕量更新
-
-  // Handle auto-refresh interval lifecycle (state-transition based updates)
+  // Handle auto-refresh interval (5-second tick)
   useEffect(() => {
-    // 1-second polling interval to detect prewarm state transitions
-    // (session status is fetched on every tick, so no separate initial call needed)
+    // 5-second polling interval for batch-quote updates
     const activeInterval = setInterval(async () => {
       if (!hasStarted) return;
 
-      const now = new Date();
-      const currentMin = now.getMinutes();
-      const currentSec = now.getSeconds();
-
-      // Poll session endpoint to check prewarm_status
+      // Update session status (for UI display only)
       try {
         const res = await axios.get(`${BASE_URL}/api/session`);
         setSession(res.data.session);
         setEstTime(res.data.est_time);
-        const status = res.data.prewarm_status || 'idle';
-        const prevStatus = prevPrewarmStatusRef.current;
-        prevPrewarmStatusRef.current = status;
-        setPrewarmStatus(status);
-
-        // 偵測到 warming -> ready 的狀態轉變，立即觸發主更新
-        if (prevStatus === 'warming' && status === 'ready') {
-          lastTriggeredMinRef.current = currentMin;
-          hasTriggeredLightweightRef.current = false;
-          mainUpdateCompletedAtRef.current = 0; // 重置觸發保護時間戳
-          console.log(`[AutoRefresh] warming→ready 偵測到，觸發主更新 at ${now.toLocaleTimeString()}`);
-
-          // 1. 立即通知後端消費 ready 狀態，轉回 idle（避免重複觸發）
-          axios.post(`${BASE_URL}/api/session/consume`).catch(err => {
-            console.warn('[AutoRefresh] consume endpoint 呼叫失敗:', err);
-          });
-
-          // 2. 觸發並等待主更新完成
-          await latestFetchRadarData.current(true, false);
-
-          // 3. 記錄主更新真正完成時間（作為輕量更新的 15 秒冷卻間隔起點）
-          mainUpdateCompletedAtRef.current = Date.now();
-        }
       } catch (e) {
-        console.error("Interval session fetch failed", e);
+        console.error("Session fetch failed", e);
       }
 
-      // 第40秒輕量更新：需距主更新完成超過 15 秒，且本分鐘主更新已觸發
-      if (
-        currentSec === 40 &&
-        !hasTriggeredLightweightRef.current &&
-        lastTriggeredMinRef.current === currentMin &&
-        mainUpdateCompletedAtRef.current > 0 &&
-        (Date.now() - mainUpdateCompletedAtRef.current) > 15000
-      ) {
-        hasTriggeredLightweightRef.current = true;
-        console.log(`[AutoRefresh] 第40秒輕量更新觸發 at ${now.toLocaleTimeString()}`);
-        latestFetchRadarData.current(true, true);
-      }
-    }, 1000);
+      // Trigger 5-second tick update
+      await latestFetchRadarData.current(true);
+    }, 5000);
 
     return () => clearInterval(activeInterval);
-  }, [autoRefreshMins, apiKey, intradayInterval, todayOnly, extendedHours, watchlistExpiryMins, hasStarted]);
+  }, [autoRefreshMins, apiKey, watchlistExpiryMins, hasStarted]);
 
   const handleManualClick = async () => {
     setHasStarted(true);
-    await handleFetchRadarData(false, results.length > 0);
+    await handleFetchRadarData(false);
   };
 
   // Clean watchlist trigger
@@ -600,10 +517,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                     <span className="text-gray-500">計算區間</span>
                     <span className="font-semibold text-white">{recentMinsWindow} 分鐘</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">K線區間</span>
-                    <span className="font-semibold text-white">{intradayInterval}</span>
-                  </div>
+
                   <div className="flex justify-between">
                     <span className="text-gray-500">觀察池效期</span>
                     <span className="font-semibold text-white">{watchlistExpiryMins} 分鐘</span>
@@ -688,32 +602,10 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                     <h3 className="font-bold text-white text-base">📡 即時雷達追蹤 (Top Gainer Radar)</h3>
                   </div>
                   <div className="flex items-center space-x-4">
-                    {/* Prewarm 狀態 Badge */}
-                    {prewarmStatus === 'warming' ? (
-                      <span className="text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center space-x-1.5 animate-pulse">
-                        <span className="w-1.5 h-1.5 bg-amber-400 rounded-full"></span>
-                        <span>預熱中…</span>
-                      </span>
-                    ) : prewarmStatus === 'ready' ? (
-                      <span className="text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center space-x-1.5">
-                        <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full"></span>
-                        <span>快取就緒</span>
-                      </span>
-                    ) : (
-                      <span className="text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800/60 text-gray-500 border border-gray-700/50 flex items-center space-x-1.5">
-                        <span className="w-1.5 h-1.5 bg-gray-600 rounded-full"></span>
-                        <span>待機</span>
-                      </span>
-                    )}
                     {fetchTime && (
                       <span className="text-xs text-gray-500 font-semibold flex items-center space-x-1">
                         <Clock size={12} />
                         <span>資料更新時間: {fetchTime}</span>
-                      </span>
-                    )}
-                    {prewarmTime !== null && prewarmTime > 0 && (
-                      <span className={`text-xs px-2 py-0.5 rounded font-semibold ${wasPrewarmed ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-gray-800 text-gray-400 border border-gray-700'}`}>
-                        {wasPrewarmed ? '⚡ 背景預熱快取' : '💾 手動輕量更新'} (耗時: {prewarmTime.toFixed(2)}s)
                       </span>
                     )}
                   </div>
@@ -869,14 +761,14 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   <div className="space-y-2">
-                    <label className="text-xs font-semibold text-gray-400">更新頻率 (分鐘)</label>
+                    <label className="text-xs font-semibold text-gray-400">Top Gainers 名單更新頻率 (分鐘)</label>
                     <NumericInput
                       value={autoRefreshMins}
                       onChange={setAutoRefreshMins}
                       min={1}
                       className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
                     />
-                    <p className="text-[10px] text-gray-500">定義即時雷達背景自動更新的週期。</p>
+                    <p className="text-[10px] text-gray-500">定義背景更新 Top Gainers 名單的週期。前端每 5 秒固定拉取即時股價。</p>
                   </div>
 
                   <div className="space-y-2">
@@ -890,19 +782,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                     <p className="text-[10px] text-gray-500">定義計算最近波動的最大漲幅區間。</p>
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-xs font-semibold text-gray-400">收盤價級距</label>
-                    <select
-                      value={intradayInterval}
-                      onChange={(e) => setIntradayInterval(e.target.value)}
-                      className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
-                    >
-                      <option value="Auto (根據更新頻率)">Auto (根據更新頻率)</option>
-                      <option value="1min">1分鐘線</option>
-                      <option value="5min">5分鐘線</option>
-                    </select>
-                    <p className="text-[10px] text-gray-500">計算最近分鐘拉回時所採用的K線週期。</p>
-                  </div>
+
 
                   <div className="space-y-2">
                     <label className="text-xs font-semibold text-gray-400">觀察池保留時間 (分鐘)</label>
@@ -916,33 +796,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                   </div>
                 </div>
 
-                <div className="flex flex-col sm:flex-row gap-6 pt-2">
-                  <label className="flex items-center space-x-2.5 text-sm text-gray-300 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={todayOnly}
-                      onChange={(e) => setTodayOnly(e.target.checked)}
-                      className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
-                    />
-                    <div>
-                      <span className="font-semibold block text-xs text-gray-200">僅載入今日交易數據</span>
-                      <span className="text-[10px] text-gray-500 block">過濾掉昨日以前的歷史股價，加快運算</span>
-                    </div>
-                  </label>
 
-                  <label className="flex items-center space-x-2.5 text-sm text-gray-300 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={extendedHours}
-                      onChange={(e) => setExtendedHours(e.target.checked)}
-                      className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
-                    />
-                    <div>
-                      <span className="font-semibold block text-xs text-gray-200">包含盤前盤後歷史價格</span>
-                      <span className="text-[10px] text-gray-500 block">計算當前和最近漲跌幅時納入盤前與盤後段</span>
-                    </div>
-                  </label>
-                </div>
               </div>
 
               {/* Settings Card 2: Threshold Filters */}
