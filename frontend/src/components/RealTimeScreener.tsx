@@ -7,7 +7,10 @@ import {
   Sliders,
   Volume2,
   ShieldAlert,
-  Clock
+  Clock,
+  X,
+  Newspaper,
+  TrendingUp
 } from 'lucide-react';
 
 interface RealTimeScreenerProps {
@@ -203,6 +206,26 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
 
   // API states
   const [isLoading, setIsLoading] = useState<boolean>(false);
+
+  // News Modal State
+  const [selectedNewsTicker, setSelectedNewsTicker] = useState<string | null>(null);
+  const [deepDiveData, setDeepDiveData] = useState<any>(null);
+  const [isNewsLoading, setIsNewsLoading] = useState<boolean>(false);
+
+  const handleOpenNews = async (ticker: string) => {
+    setSelectedNewsTicker(ticker);
+    setIsNewsLoading(true);
+    setDeepDiveData(null);
+    try {
+      const response = await axios.get(`${BASE_URL}/api/stocks/${ticker}/deep-dive?provider=FMP&api_key=${apiKey}`);
+      setDeepDiveData(response.data);
+    } catch (err) {
+      console.error('Failed to fetch news:', err);
+    } finally {
+      setIsNewsLoading(false);
+    }
+  };
+
   const [results, setResults] = useState<any[]>([]);
   const [watchlist, setWatchlist] = useState<Record<string, any>>({});
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -619,9 +642,10 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                           <th className="py-4 px-6">股票代碼</th>
                           <th className="py-4 px-6 text-right">現價</th>
                           <th className="py-4 px-6 text-right">開盤跳空 (Gap)</th>
-                          <th className="py-4 px-6 text-right">即時漲幅</th>
+                          <th className="py-4 px-6 text-right">今日漲幅</th>
                           <th className="py-4 px-6 text-right">開盤後漲幅</th>
                           <th className="py-4 px-6 text-right">最近 {recentMinsWindow} 分鐘最大漲幅</th>
+                          <th className="py-4 px-6 text-right">成交量</th>
                           <th className="py-4 px-6 text-right">市值</th>
                           <th className="py-4 px-6 text-right">流通量</th>
                           <th className="py-4 px-6 text-center">達標</th>
@@ -646,6 +670,9 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                                 </td>
                                 <td className="py-3.5 px-6 text-right font-medium text-indigo-400">
                                   {row[intervalKey]}%
+                                </td>
+                                <td className="py-3.5 px-6 text-right font-medium text-gray-300">
+                                  {row["Volume"] ? row["Volume"].toLocaleString() : 'N/A'}
                                 </td>
                                 <td className="py-3.5 px-6 text-right text-gray-400">{row["Market Cap (M)"] ? `${row["Market Cap (M)"]}M` : 'N/A'}</td>
                                 <td className="py-3.5 px-6 text-right text-gray-400">{row["Float (M)"] ? `${row["Float (M)"]}M` : 'N/A'}</td>
@@ -704,14 +731,16 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                         <tr className="bg-gray-900/40 border-b border-gray-800 text-xs font-semibold text-gray-400 uppercase whitespace-nowrap">
                           <th className="py-4 px-4">股票代碼</th>
                           <th className="py-4 px-4 text-right">觸發價格</th>
-                          <th className="py-4 px-4 text-right">即時漲幅</th>
+                          <th className="py-4 px-4 text-right">今日漲幅</th>
                           <th className="py-4 px-4 text-right">開盤後漲幅</th>
                           <th className="py-4 px-4 text-right">觸發漲幅</th>
+                          <th className="py-4 px-4 text-right">成交量</th>
                           <th className="py-4 px-4 text-right">市值</th>
                           <th className="py-4 px-4 text-right">流通量</th>
                           <th className="py-4 px-4 text-center">觸發時間</th>
                           <th className="py-4 px-4 text-center">追蹤時長</th>
                           <th className="py-4 px-4 text-right">回檔幅</th>
+                          <th className="py-4 px-4 text-center">操作</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-800/80">
@@ -737,12 +766,23 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                                 {info.current_intraday > 0 ? '+' : ''}{info.current_intraday?.toFixed(2)}%
                               </td>
                               <td className="py-3.5 px-4 text-right font-medium text-green-400">+{info.trigger_pct?.toFixed(2)}%</td>
+                              <td className="py-3.5 px-4 text-right text-gray-300">{info.volume ? info.volume.toLocaleString() : 'N/A'}</td>
                               <td className="py-3.5 px-4 text-right font-bold text-white">{info.mc_m > 0 ? `${info.mc_m.toFixed(2)}M` : 'N/A'}</td>
                               <td className="py-3.5 px-4 text-right text-gray-300">{info.float_m > 0 ? `${info.float_m.toFixed(2)}M` : 'N/A'}</td>
                               <td className="py-3.5 px-4 text-center text-gray-400">{triggerTime.toLocaleTimeString()}</td>
                               <td className="py-3.5 px-4 text-center text-gray-400 font-medium">{elapsedStr}</td>
                               <td className="py-3.5 px-4 text-right font-bold text-red-400">
                                 {pullbackPct === 0 ? '0.00' : pullbackPct.toFixed(2)}%
+                              </td>
+                              <td className="py-3.5 px-4 text-center">
+                                <button
+                                  onClick={() => handleOpenNews(ticker)}
+                                  className="bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center space-x-1 transition-colors cursor-pointer mx-auto"
+                                  title="查看新聞"
+                                >
+                                  <Newspaper size={14} />
+                                  <span>News</span>
+                                </button>
                               </td>
                             </tr>
                           );
@@ -936,6 +976,62 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
           )}
         </div>
       </div>
+      {/* News Modal */}
+      {selectedNewsTicker && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50 backdrop-blur-sm transition-opacity">
+          <div className="bg-gray-950 border border-gray-800 rounded-3xl w-full max-w-2xl max-h-[85vh] overflow-y-auto flex flex-col shadow-2xl">
+            <div className="flex justify-between items-center p-6 border-b border-gray-900 bg-gray-950 sticky top-0 z-10">
+              <h3 className="text-xl font-bold text-white flex items-center space-x-3">
+                <span className="text-indigo-400 bg-indigo-500/10 px-3 py-0.5 rounded-xl">{selectedNewsTicker}</span>
+                <span className="flex items-center space-x-2"><TrendingUp size={18} className="text-indigo-400" /> <span>最近催化劑 (Catalyst News Top 3)</span></span>
+              </h3>
+              <button
+                onClick={() => setSelectedNewsTicker(null)}
+                className="text-gray-500 hover:text-white p-2 rounded-xl hover:bg-gray-900 transition-colors cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6">
+              {isNewsLoading ? (
+                <div className="w-full flex items-center justify-center py-12 space-x-3 text-gray-500">
+                  <span className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></span>
+                  <p className="text-sm">加載新聞中...</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="divide-y divide-gray-800/80 space-y-4">
+                    {deepDiveData?.news && deepDiveData.news.length > 0 ? (
+                      deepDiveData.news.map((item: any, idx: number) => (
+                        <div key={idx} className="pt-4 first:pt-0 space-y-1.5">
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-sm font-semibold text-indigo-400 hover:text-indigo-300 hover:underline leading-snug block"
+                          >
+                            {item.title}
+                          </a>
+                          <div className="flex justify-between text-[10px] text-gray-600 font-medium">
+                            <span>來源: {item.site || '未知'}</span>
+                            <span>發布: {item.publishedDate?.split(' ')[0]}</span>
+                          </div>
+                          <p className="text-xs text-gray-400 line-clamp-3 leading-normal">
+                            {item.text}
+                          </p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-gray-500">查無此標的近期之新聞催化劑。</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

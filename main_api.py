@@ -752,6 +752,7 @@ def post_screener_tick(req: RealtimeTickRequest):
             "Gainer (%)": round(changes_pct, 2),
             "開盤到目前漲幅 (%)": round(intraday_pct, 2),
             f"最近{req.recent_mins_window}分鐘最大漲幅 (%)": round(recent_pct, 2),
+            "Volume": q.get("volume", 0),
             "Market Cap (M)": round(mc_m, 2) if mc_m > 0 else None,
             "Float (M)": round(float_m, 2) if float_m > 0 else None,
             "達標 Signal": "✅" if is_passed else "❌",
@@ -799,10 +800,12 @@ def post_screener_tick(req: RealtimeTickRequest):
         # 4. Inject real-time stats for frontend rendering
         open_price = q.get("open", 0)
         market_cap = q.get("marketCap", 0)
+        volume = q.get("volume", 0)
         
         watchlist[ticker]["current_price"] = price
         watchlist[ticker]["current_gainer"] = q.get("changePercentage", 0)
         watchlist[ticker]["current_intraday"] = ((price / open_price - 1) * 100) if open_price and open_price > 0 else 0
+        watchlist[ticker]["volume"] = volume
         watchlist[ticker]["mc_m"] = market_cap / 1e6 if market_cap else 0
         
         float_shares = GLOBAL_FLOATS_CACHE.get(ticker, 0)
