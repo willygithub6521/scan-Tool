@@ -759,49 +759,54 @@ def post_screener_tick(req: RealtimeTickRequest):
             "_recent_pct": recent_pct
         })
 
-    # 5. Watchlist updates (gainers + watchlist-only tickers both get max_price updates)
+    # 5. Unified Watchlist Updates
     now_dt = datetime.datetime.now()
     watchlist = req.watchlist.copy()
     new_notifications = []
+    expiry_secs = req.watchlist_expiry_mins * 60
 
+    # Step 5a: Add newly triggered items from the current screener results
     for r in results:
         ticker = r["Ticker"]
-        price = r["Price"]
-        if r["_is_passed"]:
-            if ticker not in watchlist:
-                watchlist[ticker] = {
-                    "trigger_time": now_dt.isoformat(),
-                    "trigger_price": price,
-                    "trigger_pct": r["_recent_pct"],
-                    "max_price_since_trigger": price
-                }
-                new_notifications.append(ticker)
-            else:
-                watchlist[ticker]["max_price_since_trigger"] = max(
-                    watchlist[ticker]["max_price_since_trigger"], price
-                )
-        elif ticker in watchlist:
+        if r["_is_passed"] and ticker not in watchlist:
+            watchlist[ticker] = {
+                "trigger_time": now_dt.isoformat(),
+                "trigger_price": r["Price"],
+                "trigger_pct": r["_recent_pct"],
+                "max_price_since_trigger": r["Price"]
+            }
+            new_notifications.append(ticker)
+
+    # Step 5b: Single pass to update max price, inject real-time stats, and remove expired entries
+    for ticker in list(watchlist.keys()):
+        info = watchlist[ticker]
+        
+        # 1. Remove expired entries
+        if (now_dt - datetime.datetime.fromisoformat(info["trigger_time"])).total_seconds() > expiry_secs:
+            watchlist.pop(ticker, None)
+            continue
+            
+        # 2. Get latest quote for this ticker
+        q = quotes_dict.get(ticker, {})
+        price = q.get("price", 0)
+        
+        # 3. Update max price
+        if price > 0:
             watchlist[ticker]["max_price_since_trigger"] = max(
                 watchlist[ticker]["max_price_since_trigger"], price
             )
-
-    # Also update max_price for watchlist-only tickers (not in gainers results)
-    for ticker in watchlist_tickers:
-        if ticker not in gainers_tickers:
-            wl_price = quotes_dict.get(ticker, {}).get("price", 0)
-            if wl_price and wl_price > 0 and ticker in watchlist:
-                watchlist[ticker]["max_price_since_trigger"] = max(
-                    watchlist[ticker]["max_price_since_trigger"], wl_price
-                )
-
-    # Delete expired watchlist entries
-    expiry_secs = req.watchlist_expiry_mins * 60
-    expired = [
-        t for t, info in watchlist.items()
-        if (now_dt - datetime.datetime.fromisoformat(info["trigger_time"])).total_seconds() > expiry_secs
-    ]
-    for t in expired:
-        watchlist.pop(t, None)
+            
+        # 4. Inject real-time stats for frontend rendering
+        open_price = q.get("open", 0)
+        market_cap = q.get("marketCap", 0)
+        
+        watchlist[ticker]["current_price"] = price
+        watchlist[ticker]["current_gainer"] = q.get("changePercentage", 0)
+        watchlist[ticker]["current_intraday"] = ((price / open_price - 1) * 100) if open_price and open_price > 0 else 0
+        watchlist[ticker]["mc_m"] = market_cap / 1e6 if market_cap else 0
+        
+        float_shares = GLOBAL_FLOATS_CACHE.get(ticker, 0)
+        watchlist[ticker]["float_m"] = float_shares / 1e6 if float_shares else 0
 
     # Strip internal fields from results
     for r in results:

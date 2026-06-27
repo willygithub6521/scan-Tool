@@ -701,13 +701,17 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                   {Object.keys(watchlist).length > 0 ? (
                     <table className="w-full text-left border-collapse text-sm">
                       <thead>
-                        <tr className="bg-gray-900/40 border-b border-gray-800 text-xs font-semibold text-gray-400 uppercase">
-                          <th className="py-4 px-6">股票代碼</th>
-                          <th className="py-4 px-6">觸發時間</th>
-                          <th className="py-4 px-6">追蹤時長</th>
-                          <th className="py-4 px-6 text-right">觸發價</th>
-                          <th className="py-4 px-6 text-right">觸發漲幅</th>
-                          <th className="py-4 px-6 text-right">回檔幅 (%) (Pullback)</th>
+                        <tr className="bg-gray-900/40 border-b border-gray-800 text-xs font-semibold text-gray-400 uppercase whitespace-nowrap">
+                          <th className="py-4 px-4">股票代碼</th>
+                          <th className="py-4 px-4 text-right">觸發價格</th>
+                          <th className="py-4 px-4 text-right">即時漲幅</th>
+                          <th className="py-4 px-4 text-right">開盤後漲幅</th>
+                          <th className="py-4 px-4 text-right">觸發漲幅</th>
+                          <th className="py-4 px-4 text-right">市值</th>
+                          <th className="py-4 px-4 text-right">流通量</th>
+                          <th className="py-4 px-4 text-center">觸發時間</th>
+                          <th className="py-4 px-4 text-center">追蹤時長</th>
+                          <th className="py-4 px-4 text-right">回檔幅</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-800/80">
@@ -716,21 +720,28 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                           const elapsedSecs = Math.floor((new Date().getTime() - triggerTime.getTime()) / 1000);
                           const elapsedMins = Math.floor(elapsedSecs / 60);
                           const elapsedSecsRemain = elapsedSecs % 60;
-                          const elapsedStr = `${elapsedMins}分${elapsedSecsRemain}秒前`;
-
-                          const currentQuote = results.find(r => r.Ticker === ticker);
-                          const currentPrice = currentQuote ? currentQuote.Price : info.trigger_price;
+                          const elapsedStr = `${elapsedMins}分${elapsedSecsRemain}秒`;
+                          const currentPrice = info.current_price || info.trigger_price;
                           const maxPrice = Math.max(info.max_price_since_trigger, currentPrice);
                           const pullbackPct = maxPrice > 0 ? ((currentPrice / maxPrice - 1) * 100) : 0.0;
-
+                          const gainerClass = info.current_gainer >= 0 ? "text-green-400" : "text-red-400";
+                          const intradayClass = info.current_intraday >= 0 ? "text-green-400" : "text-red-400";
                           return (
-                            <tr key={ticker} className="hover:bg-gray-800/20 transition-colors">
-                              <td className="py-3.5 px-6 font-bold text-white tracking-wide">{ticker}</td>
-                              <td className="py-3.5 px-6 text-gray-400">{triggerTime.toLocaleTimeString()}</td>
-                              <td className="py-3.5 px-6 text-gray-400 font-medium">{elapsedStr}</td>
-                              <td className="py-3.5 px-6 text-right font-semibold text-gray-100">${info.trigger_price}</td>
-                              <td className="py-3.5 px-6 text-right font-medium text-green-400">+{info.trigger_pct?.toFixed(2)}%</td>
-                              <td className="py-3.5 px-6 text-right font-bold text-red-400">
+                            <tr key={ticker} className="hover:bg-gray-800/20 transition-colors whitespace-nowrap">
+                              <td className="py-3.5 px-4 font-bold text-white tracking-wide">{ticker}</td>
+                              <td className="py-3.5 px-4 text-right font-semibold text-gray-100">${info.trigger_price}</td>
+                              <td className={`py-3.5 px-4 text-right font-medium ${gainerClass}`}>
+                                {info.current_gainer > 0 ? '+' : ''}{info.current_gainer?.toFixed(2)}%
+                              </td>
+                              <td className={`py-3.5 px-4 text-right font-medium ${intradayClass}`}>
+                                {info.current_intraday > 0 ? '+' : ''}{info.current_intraday?.toFixed(2)}%
+                              </td>
+                              <td className="py-3.5 px-4 text-right font-medium text-green-400">+{info.trigger_pct?.toFixed(2)}%</td>
+                              <td className="py-3.5 px-4 text-right font-bold text-white">{info.mc_m > 0 ? `${info.mc_m.toFixed(2)}M` : 'N/A'}</td>
+                              <td className="py-3.5 px-4 text-right text-gray-300">{info.float_m > 0 ? `${info.float_m.toFixed(2)}M` : 'N/A'}</td>
+                              <td className="py-3.5 px-4 text-center text-gray-400">{triggerTime.toLocaleTimeString()}</td>
+                              <td className="py-3.5 px-4 text-center text-gray-400 font-medium">{elapsedStr}</td>
+                              <td className="py-3.5 px-4 text-right font-bold text-red-400">
                                 {pullbackPct === 0 ? '0.00' : pullbackPct.toFixed(2)}%
                               </td>
                             </tr>
