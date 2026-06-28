@@ -147,9 +147,11 @@ def background_gainers_refresh_thread():
         except Exception as e:
             print(f"[GainersRefresh] Exception: {e}", flush=True)
 
-# Start daemon gainers refresh thread
-import threading
-threading.Thread(target=background_gainers_refresh_thread, daemon=True).start()
+# Start daemon gainers refresh thread only when FastAPI starts
+@app.on_event("startup")
+def startup_event():
+    import threading
+    threading.Thread(target=background_gainers_refresh_thread, daemon=True).start()
 
 
 def sanitize_value(val):
