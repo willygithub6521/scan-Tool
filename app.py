@@ -112,7 +112,7 @@ with st.sidebar.expander("動能漲幅與爆量篩選 (Client-Side)", expanded=T
     
     st.markdown("---")
     st.markdown("**歷史記錄篩選**")
-    strategy_select = st.selectbox("策略選擇", ["1.Extended Short", "2.Fake Breakout Short", "3.QullaMaggie Breakout"], index=0)
+    strategy_select = st.selectbox("策略選擇", ["1.Extended Short", "2.Fake Breakout Short", "3.QullaMaggie Breakout", "4.曾經單日漲幅Breakout"], index=0)
     
     hist_cfg = {}
     if strategy_select == "1.Extended Short":
@@ -169,6 +169,21 @@ with st.sidebar.expander("動能漲幅與爆量篩選 (Client-Side)", expanded=T
             
         hist_cfg['qm_min_ret'] = st.number_input("期間漲幅大於 (%)", value=30.0, step=5.0)
         strict_history_filter = st.checkbox("啟用 QullaMaggie 突破過濾 (獨立篩選)", value=False)
+    elif strategy_select == "4.曾經單日漲幅Breakout":
+        input_type = st.radio("時間區間設定方式", ["依月份選擇", "手動輸入天數"], horizontal=True)
+        if input_type == "依月份選擇":
+            month_opts = {"1個月": 21, "3個月": 63, "6個月": 126, "12個月": 252, "18個月": 378}
+            sel_month = st.selectbox("前 N 個月區間", list(month_opts.keys()), index=1)
+            hist_cfg['qm_days'] = month_opts[sel_month]
+            st.caption(f"已自動轉換為 {hist_cfg['qm_days']} 個交易日")
+        else:
+            hist_cfg['qm_days'] = st.number_input("前 N 日區間 (天)", value=20, min_value=1, step=1)
+            
+        hist_cfg['qm_min_ret'] = st.number_input("單日曾經漲幅大於 (%)", value=30.0, step=5.0)
+        hist_cfg['use_body_filter'] = st.checkbox("啟用長綠K線篩選", value=False)
+        if hist_cfg['use_body_filter']:
+            hist_cfg['min_body_ret'] = st.number_input("長綠K線實體漲幅大於 (%)", value=15.0, step=5.0)
+        strict_history_filter = st.checkbox("啟用 曾經單日漲幅Breakout 過濾 (獨立篩選)", value=False)
     
     st.markdown("---")
     vol_multiplier = st.number_input("RVOL 異常倍數 (今量 vs 20日均量)", value=10.0, step=1.0)
@@ -341,17 +356,26 @@ results_df = pd.DataFrame(results)
 # 實踐「嚴格過濾」機制：即時更新 Table！
 # 解耦：當使用者在側邊欄調整 N 日、或漲幅下限時，直接重新計算並覆寫 dataframe
 if not results_df.empty and raw_data_dict:
-    cols_to_drop = [c for c in results_df.columns if "漲幅" in c or "_PassStrict" in c or "爆量" in c or "RVOL" in c or "歷史暴漲" in c or "歷史假突破" in c or "QullaMaggie" in c or "SMA" in c]
+    cols_to_drop = [c for c in results_df.columns if "漲幅" in c or "_PassStrict" in c or "爆量" in c or "RVOL" in c or "歷史暴漲" in c or "歷史假突破" in c or "QullaMaggie" in c or "單日漲幅Breakout" in c or "SMA" in c or "達標日期" in c or "當日Volume" in c or "Float" in c or "News" in c]
     results_df = results_df.drop(columns=cols_to_drop, errors='ignore')
     
     ret_1d_list, ret_nd_list, pass_1d_list, pass_nd_list, pass_strict_list, pass_vol_list, rvol_list, pass_hist_list = [], [], [], [], [], [], [], []
     qm_recent_ret_list = []
     ext_date_list = []
     ext_ret_list = []
+    ext_vol_list = []
     adv_ret_list = []
     sma_val_list = []
     price_sma_list = []
     
+    float_dict = {}
+    if strict_history_filter and strategy_select == "4.曾經單日漲幅Breakout" and fmp_api_key:
+        try:
+            from main_api import get_floats_optimized
+            float_dict = get_floats_optimized(fmp_api_key, results_df["Ticker"].tolist())
+        except Exception:
+            pass
+            
     for _, row in results_df.iterrows():
         ticker = row["Ticker"]
         df = raw_data_dict.get(ticker)
@@ -447,6 +471,40 @@ if not results_df.empty and raw_data_dict:
                         hist_match = bool(qm_recent_ret >= hist_cfg['qm_min_ret']) if not pd.isna(qm_recent_ret) else False
                     else:
                         hist_match = False
+                elif strategy_select == "4.曾經單日漲幅Breakout":
+                    qm_days = int(hist_cfg['qm_days'])
+                    use_body = hist_cfg.get('use_body_filter', False)
+                    min_body = hist_cfg.get('min_body_ret', 0.0)
+                    only_green = hist_cfg.get('only_green', False)
+                    
+                    if len(df) > 1:
+                        recent_df = df.tail(qm_days + 1).copy()
+                        daily_rets = (recent_df['Close'] / recent_df['Close'].shift(1) - 1) * 100
+                        body_rets = (recent_df['Close'] / recent_df['Open'] - 1) * 100
+                        
+                        cond = daily_rets >= hist_cfg['qm_min_ret']
+                        if use_body:
+                            cond = cond & (body_rets >= min_body)
+                        if only_green:
+                            cond = cond & (recent_df['Close'] >= recent_df['Open'])
+                            
+                        match_days = recent_df[cond]
+                        if not match_days.empty:
+                            hist_match = True
+                            best_day_idx = daily_rets[cond].idxmax()
+                            qm_recent_ret = daily_rets.loc[best_day_idx]
+                            ext_date = best_day_idx.strftime('%Y-%m-%d')
+                            ext_vol = recent_df.loc[best_day_idx, 'Volume'] / 1e6
+                        else:
+                            hist_match = False
+                            qm_recent_ret = 0.0
+                            ext_date = ""
+                            ext_vol = 0.0
+                    else:
+                        hist_match = False
+                        qm_recent_ret = 0.0
+                        ext_date = ""
+                        ext_vol = 0.0
                 else:
                     hist_match = False
             else:
@@ -464,6 +522,7 @@ if not results_df.empty and raw_data_dict:
             ext_date_list.append(ext_date)
             ext_ret_list.append(round(ext_ret, 2))
             adv_ret_list.append(adv_ret)
+            ext_vol_list.append(ext_vol if 'ext_vol' in locals() else 0.0)
             
             latest_sma = df[f'SMA_{sma_window}'].iloc[-1] if f'SMA_{sma_window}' in df.columns else 0.0
             price_sma_cond = df['Close'].iloc[-1] > latest_sma if len(df) > 0 else False
@@ -481,6 +540,7 @@ if not results_df.empty and raw_data_dict:
             qm_recent_ret_list.append(0.0)
             ext_date_list.append("")
             ext_ret_list.append(0.0)
+            ext_vol_list.append(0.0)
             adv_ret_list.append("N/A")
             sma_val_list.append(0.0)
             price_sma_list.append("❌")
@@ -508,10 +568,31 @@ if not results_df.empty and raw_data_dict:
             hist_col_name = "歷史假突破達標"
             results_df["歷史假突破日期"] = ext_date_list
             results_df["假突破Gap(%)"] = ext_ret_list
-        else:
+        elif strategy_select == "3.QullaMaggie Breakout":
             hist_col_name = "QullaMaggie突破達標"
             qm_days = int(hist_cfg.get('qm_days', 20))
             results_df[f"QM_{qm_days}日內近期漲幅(%)"] = qm_recent_ret_list
+        else:
+            hist_col_name = "單日漲幅Breakout達標"
+            qm_days = int(hist_cfg.get('qm_days', 20))
+            results_df[f"過去{qm_days}日內最大單日漲幅(%)"] = qm_recent_ret_list
+            results_df["達標日期"] = ext_date_list
+            results_df["當日Volume(M)"] = [round(v, 2) if v > 0 else 0 for v in ext_vol_list]
+            
+            float_col = []
+            news_col = []
+            for i, row in results_df.iterrows():
+                t = row["Ticker"]
+                d = ext_date_list[i]
+                fm = float_dict.get(t, 0) / 1e6 if float_dict.get(t, 0) else 0
+                float_col.append(f"{fm:.2f}M" if fm > 0 else "N/A")
+                if d and pass_hist_list[i] == "✅":
+                    news_col.append(f"https://www.google.com/search?tbm=nws&q={t}+stock+{d}")
+                else:
+                    news_col.append("")
+                    
+            results_df["Float(M)"] = float_col
+            results_df["📰 News"] = news_col
             
         results_df[hist_col_name] = pass_hist_list
         
@@ -569,7 +650,14 @@ with tab1:
             st.session_state["saved_history"][now_str] = results_df.copy()
             st.success(f"已成功將 {len(results_df)} 檔潛在股儲存至「歷史庫存」標籤頁！")
     #Display a dynamic Pandas DataFrame in Streamlit.      
-    st.dataframe(results_df, use_container_width=True, hide_index=True)
+    st.dataframe(
+        results_df, 
+        use_container_width=True, 
+        hide_index=True,
+        column_config={
+            "📰 News": st.column_config.LinkColumn("📰 News", display_text="Google News")
+        }
+    )
 
 with tab2:
     st.subheader("個股技術線圖與指標")

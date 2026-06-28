@@ -190,7 +190,7 @@ class FMPProvider(DataProvider):
 
     def fetch_screener_tickers(self, params: dict) -> list:
         query_string = "&".join(f"{k}={v}" for k, v in params.items() if v)
-        url = f"{self.base_url}/company-screener?apikey={self.api_key}&{query_string}"#isActivelyTrading=true 查詢有活躍交易的股票
+        url = f"{self.base_url}/company-screener?apikey={self.api_key}&isActivelyTrading=true&{query_string}"
         try:
             response = requests.get(url)
             data = response.json()

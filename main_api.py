@@ -189,7 +189,7 @@ class ScanRequest(BaseModel):
     min_nd_return: float = 50.0
     match_logic: str = "OR (任一條件達標即可)"  # "OR (任一條件達標即可)" or "AND (全部條件皆須達標)"
     strict_return_filter: bool = False
-    strategy_select: str = "1.Extended Short"  # "1.Extended Short", "2.Fake Breakout Short", "3.QullaMaggie Breakout"
+    strategy_select: str = "1.Extended Short"  # "1.Extended Short", "2.Fake Breakout Short", "3.QullaMaggie Breakout", "4.曾經單日漲幅Breakout"
     hist_cfg: Dict[str, Any] = {}
     strict_history_filter: bool = False
     vol_multiplier: float = 10.0
@@ -572,6 +572,38 @@ def post_scan(req: ScanRequest):
             else:
                 hist_match = False
 
+        elif req.strategy_select == "4.曾經單日漲幅Breakout":
+            qm_days = int(req.hist_cfg.get('qm_days', 20))
+            use_body = req.hist_cfg.get('use_body_filter', False)
+            min_body = req.hist_cfg.get('min_body_ret', 0.0)
+            
+            if len(df) > 1:
+                recent_df = df.tail(qm_days + 1).copy()
+                daily_rets = (recent_df['Close'] / recent_df['Close'].shift(1) - 1) * 100
+                body_rets = (recent_df['Close'] / recent_df['Open'] - 1) * 100
+                
+                cond = daily_rets >= req.hist_cfg.get('qm_min_ret', 30.0)
+                if use_body:
+                    cond = cond & (body_rets >= min_body)
+                    
+                match_days = recent_df[cond]
+                if not match_days.empty:
+                    hist_match = True
+                    best_day_idx = daily_rets[cond].idxmax()
+                    qm_recent_ret = float(daily_rets.loc[best_day_idx])
+                    ext_date = best_day_idx.strftime('%Y-%m-%d')
+                    ext_vol = float(recent_df.loc[best_day_idx, 'Volume']) / 1e6
+                else:
+                    hist_match = False
+                    qm_recent_ret = 0.0
+                    ext_date = ""
+                    ext_vol = 0.0
+            else:
+                hist_match = False
+                qm_recent_ret = 0.0
+                ext_date = ""
+                ext_vol = 0.0
+
         # Apply strict filters to exclude rows
         if req.strict_return_filter and not is_strict_passed:
             continue
@@ -617,11 +649,23 @@ def post_scan(req: ScanRequest):
                 hist_col_name = "歷史假突破達標"
                 row_dict["歷史假突破日期"] = ext_date
                 row_dict["假突破Gap(%)"] = round(ext_ret, 2)
-            else:
+            elif req.strategy_select == "3.QullaMaggie Breakout":
                 hist_col_name = "QullaMaggie突破達標"
                 qm_days = int(req.hist_cfg.get('qm_days', 20))
                 row_dict[f"QM_{qm_days}日內近期漲幅(%)"] = round(qm_recent_ret, 2)
+            else:
+                hist_col_name = "單日漲幅Breakout達標"
+                qm_days = int(req.hist_cfg.get('qm_days', 20))
+                row_dict[f"過去{qm_days}日內最大單日漲幅(%)"] = round(qm_recent_ret, 2)
+                row_dict["達標日期"] = ext_date
+                row_dict["當日Volume(M)"] = round(ext_vol, 2) if ext_vol > 0 else 0
                 
+                fm = GLOBAL_FLOATS_CACHE.get(ticker, 0) / 1e6 if GLOBAL_FLOATS_CACHE.get(ticker, 0) else 0
+                row_dict["Float(M)"] = f"{fm:.2f}M" if fm > 0 else "N/A"
+                if ext_date and hist_match:
+                    row_dict["📰 News"] = f"https://www.google.com/search?tbm=nws&q={ticker}+stock+{ext_date}"
+                else:
+                    row_dict["📰 News"] = ""
             row_dict[hist_col_name] = "✅" if hist_match else "❌"
 
         if req.strict_vol_filter:

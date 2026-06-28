@@ -70,10 +70,13 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   const [fbTimeRangeMin] = useState<number>(0);
   const [fbTimeRangeMax] = useState<number>(12);
 
-  // QullaMaggie Breakout
-  const [qmDays, setQmDays] = useState<number>(63);
+  // QullaMaggie Breakout & Single Day Breakout
+  const [qmDaysInputType, setQmDaysInputType] = useState('依月份選擇');
+  const [qmSelMonth, setQmSelMonth] = useState('3個月');
+  const [qmDaysManual, setQmDaysManual] = useState(20);
   const [qmMinRet, setQmMinRet] = useState<number>(30.0);
-
+  const [useBodyFilter, setUseBodyFilter] = useState<boolean>(false);
+  const [minBodyRet, setMinBodyRet] = useState<number>(15.0);
   const [strictHistoryFilter, setStrictHistoryFilter] = useState<boolean>(false);
 
   // Volatility
@@ -171,8 +174,13 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
         min_prev_close: fbMinPrevClose,
         min_shadow_ratio: fbMinShadowRatio,
         time_range: [fbTimeRangeMin, fbTimeRangeMax]
+      } : strategySelect === '4.曾經單日漲幅Breakout' ? {
+        qm_days: qmDaysInputType === '依月份選擇' ? (qmSelMonth === '1個月' ? 21 : qmSelMonth === '3個月' ? 63 : 126) : qmDaysManual,
+        qm_min_ret: qmMinRet,
+        use_body_filter: useBodyFilter,
+        min_body_ret: minBodyRet
       } : {
-        qm_days: qmDays,
+        qm_days: qmDaysInputType === '依月份選擇' ? (qmSelMonth === '1個月' ? 21 : qmSelMonth === '3個月' ? 63 : 126) : qmDaysManual,
         qm_min_ret: qmMinRet
       },
       strict_history_filter: strictHistoryFilter,
@@ -453,6 +461,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                 <option value="1.Extended Short">1. Extended Short</option>
                 <option value="2.Fake Breakout Short">2. Fake Breakout Short</option>
                 <option value="3.QullaMaggie Breakout">3. QullaMaggie Breakout</option>
+                <option value="4.曾經單日漲幅Breakout">4. 曾經單日漲幅Breakout</option>
               </select>
             </div>
 
@@ -493,20 +502,50 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
               </div>
             )}
 
-            {strategySelect === '3.QullaMaggie Breakout' && (
+            {(strategySelect === '3.QullaMaggie Breakout' || strategySelect === '4.曾經單日漲幅Breakout') && (
               <div className="space-y-3 bg-gray-900/40 p-3 rounded-lg border border-gray-800 text-xs">
                 <div>
-                  <label className="text-gray-500 block">期間天數區間</label>
-                  <select value={qmDays} onChange={(e) => setQmDays(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white">
-                    <option value={21}>1個月 (21日)</option>
-                    <option value={63}>3個月 (63日)</option>
-                    <option value={126}>6個月 (126日)</option>
+                  <label className="text-gray-500 block">期間天數設定</label>
+                  <select value={qmDaysInputType} onChange={(e) => setQmDaysInputType(e.target.value)} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white">
+                    <option value="依月份選擇">依月份選擇</option>
+                    <option value="自訂天數">自訂天數</option>
                   </select>
                 </div>
+                {qmDaysInputType === '依月份選擇' ? (
+                  <select value={qmSelMonth} onChange={(e) => setQmSelMonth(e.target.value)} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white">
+                    <option value="1個月">1個月 (21日)</option>
+                    <option value="3個月">3個月 (63日)</option>
+                    <option value="6個月">6個月 (126日)</option>
+                  </select>
+                ) : (
+                  <input type="number" value={qmDaysManual} onChange={(e) => setQmDaysManual(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" placeholder="天數" />
+                )}
                 <div>
-                  <label className="text-gray-500 block">期間漲幅大於 (%)</label>
+                  <label className="text-gray-500 block">
+                    {strategySelect === '3.QullaMaggie Breakout' ? '期間漲幅大於 (%)' : '單日曾經漲幅大於 (%)'}
+                  </label>
                   <input type="number" value={qmMinRet} onChange={(e) => setQmMinRet(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
                 </div>
+                
+                {strategySelect === '4.曾經單日漲幅Breakout' && (
+                  <div className="pt-2 border-t border-gray-800/60 mt-3">
+                    <label className="flex items-center space-x-2 text-sm font-medium text-gray-400 cursor-pointer mb-2">
+                      <input 
+                        type="checkbox" 
+                        checked={useBodyFilter}
+                        onChange={(e) => setUseBodyFilter(e.target.checked)}
+                        className="text-indigo-600 focus:ring-indigo-500 rounded" 
+                      />
+                      <span>啟用長綠K線篩選</span>
+                    </label>
+                    {useBodyFilter && (
+                      <div className="mt-2">
+                        <label className="text-gray-500 block">長綠K線實體漲幅大於 (%)</label>
+                        <input type="number" value={minBodyRet} onChange={(e) => setMinBodyRet(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -517,7 +556,9 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                 onChange={(e) => setStrictHistoryFilter(e.target.checked)}
                 className="text-indigo-600 focus:ring-indigo-500 rounded" 
               />
-              <span>啟用策略暴漲/假突破獨立篩選</span>
+              <span className="ml-2 text-sm text-gray-300">
+                啟用 {strategySelect === '3.QullaMaggie Breakout' ? 'QullaMaggie 突破' : '曾經單日漲幅Breakout'} 過濾 (獨立篩選)
+              </span>
             </label>
           </div>
 
@@ -611,6 +652,10 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                       {showSmaCols && <th className="py-4 px-6 text-center">價 &gt; SMA</th>}
                       {results[0] && results[0]["1日漲幅(%)"] !== undefined && <th className="py-4 px-6 text-right">1日漲幅</th>}
                       {results[0] && results[0]["歷史暴漲日期"] !== undefined && <th className="py-4 px-6 text-center">策略標記</th>}
+                      {results[0] && results[0]["達標日期"] !== undefined && <th className="py-4 px-6 text-center">達標日期</th>}
+                      {results[0] && results[0]["當日Volume(M)"] !== undefined && <th className="py-4 px-6 text-right">Volume(M)</th>}
+                      {results[0] && results[0]["Float(M)"] !== undefined && <th className="py-4 px-6 text-right">Float(M)</th>}
+                      {results[0] && results[0]["📰 News"] !== undefined && <th className="py-4 px-6 text-center">新聞</th>}
                       <th className="py-4 px-6 text-center">操作</th>
                     </tr>
                   </thead>
@@ -638,6 +683,32 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                         {row["歷史暴漲日期"] !== undefined && (
                           <td className="py-3.5 px-6 text-center text-xs text-gray-400">
                             暴漲: {row["歷史暴漲日期"]} ({row["歷史暴漲幅度(%)"]}%)
+                          </td>
+                        )}
+                        {row["達標日期"] !== undefined && (
+                          <td className="py-3.5 px-6 text-center text-xs text-gray-300">
+                            {row["達標日期"] || '-'}
+                          </td>
+                        )}
+                        {row["當日Volume(M)"] !== undefined && (
+                          <td className="py-3.5 px-6 text-right text-gray-400">
+                            {row["當日Volume(M)"] > 0 ? row["當日Volume(M)"] : '-'}
+                          </td>
+                        )}
+                        {row["Float(M)"] !== undefined && (
+                          <td className="py-3.5 px-6 text-right text-gray-400">
+                            {row["Float(M)"]}
+                          </td>
+                        )}
+                        {row["📰 News"] !== undefined && (
+                          <td className="py-3.5 px-6 text-center">
+                            {row["📰 News"] ? (
+                              <a href={row["📰 News"]} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline text-xs">
+                                Google News
+                              </a>
+                            ) : (
+                              <span className="text-gray-600 text-xs">-</span>
+                            )}
                           </td>
                         )}
                         <td className="py-3.5 px-6 text-center">
