@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { 
-  Play, 
-  Download, 
-  Bookmark, 
-  TrendingUp, 
-  ChevronRight, 
-  X, 
-  Sliders, 
+import {
+  Play,
+  Download,
+  Bookmark,
+  TrendingUp,
+  ChevronRight,
+  X,
+  Sliders,
   Activity,
   FileSpreadsheet
 } from 'lucide-react';
@@ -26,14 +26,14 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   const [tickersInput, setTickersInput] = useState<string>('AAPL\nMSFT\nGOOGL\nNVDA\nTSLA');
   const [csvTickers, setCsvTickers] = useState<string[]>([]);
   const [period, setPeriod] = useState<string>('2y');
-  
+
   // FMP Server Params
   const [mktCapMin, setMktCapMin] = useState<number>(0);
   const [mktCapMax, setMktCapMax] = useState<number>(500);
   const [priceMin, setPriceMin] = useState<number>(1.0);
   const [priceMax, setPriceMax] = useState<number>(5.0);
-  const [volMin] = useState<number>(1.0);
-  const [volMax] = useState<number>(500);
+  const [volMin, setVolMin] = useState<number>(1.0);
+  const [volMax, setVolMax] = useState<number>(500);
   const [sector, setSector] = useState<string>('');
   const [industry] = useState<string>('');
   const [limit, setLimit] = useState<number>(100);
@@ -55,20 +55,20 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   const [extMinBodyRet, setExtMinBodyRet] = useState<number>(70.0);
   const [extTimeRangeMin, setExtTimeRangeMin] = useState<number>(0);
   const [extTimeRangeMax, setExtTimeRangeMax] = useState<number>(12);
-  const [extEnableAdv] = useState<boolean>(false);
-  const [extAdvNDays] = useState<number>(1);
-  const [extAdvRetDir] = useState<'漲' | '跌'>('跌');
-  const [extAdvRetType] = useState<'大於' | '小於'>('大於');
-  const [extAdvRetVal] = useState<number>(0.0);
+  const [extEnableAdv, setExtEnableAdv] = useState<boolean>(false);
+  const [extAdvNDays, setExtAdvNDays] = useState<number>(1);
+  const [extAdvRetDir, setExtAdvRetDir] = useState<'漲' | '跌'>('跌');
+  const [extAdvRetType, setExtAdvRetType] = useState<'大於' | '小於'>('大於');
+  const [extAdvRetVal, setExtAdvRetVal] = useState<number>(0.0);
   const [extAdvStrict] = useState<boolean>(false);
 
   // Fake Breakout
   const [fbMinGap, setFbMinGap] = useState<number>(30.0);
-  const [fbMinVolM] = useState<number>(10.0);
-  const [fbMinPrevClose] = useState<number>(1.0);
+  const [fbMinVolM, setFbMinVolM] = useState<number>(10.0);
+  const [fbMinPrevClose, setFbMinPrevClose] = useState<number>(1.0);
   const [fbMinShadowRatio, setFbMinShadowRatio] = useState<number>(60.0);
-  const [fbTimeRangeMin] = useState<number>(0);
-  const [fbTimeRangeMax] = useState<number>(12);
+  const [fbTimeRangeMin, setFbTimeRangeMin] = useState<number>(0);
+  const [fbTimeRangeMax, setFbTimeRangeMax] = useState<number>(12);
 
   // QullaMaggie Breakout & Single Day Breakout
   const [qmDaysInputType, setQmDaysInputType] = useState('依月份選擇');
@@ -85,6 +85,8 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
 
   // UI state
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [scanProgress, setScanProgress] = useState<{ processed: number, total: number } | null>(null);
+  const [screenerCount, setScreenerCount] = useState<number | null>(null);
   const [results, setResults] = useState<any[]>([]);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
@@ -111,6 +113,8 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   // Run historical stock scan
   const handleStartScan = async () => {
     setIsLoading(true);
+    setScanProgress(null);
+    setScreenerCount(null);
     setErrorMsg('');
     setResults([]);
 
@@ -126,29 +130,46 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
       finalTickers = csvTickers;
     }
 
-    if (inputMethod !== 'FMP 伺服器端進階篩選' && finalTickers.length === 0) {
-      setErrorMsg('請輸入至少一檔股票代碼或上傳 CSV！');
+    if (inputMethod === 'FMP 伺服器端進階篩選') {
+      try {
+        const screenerPayload = {
+          fmp_api_key: apiKey || null,
+          params: {
+            marketCapMoreThan: mktCapMin * 1000000,
+            marketCapLowerThan: mktCapMax * 1000000,
+            priceMoreThan: priceMin,
+            priceLowerThan: priceMax,
+            volumeMoreThan: volMin * 1000000,
+            volumeLowerThan: volMax * 1000000,
+            sector: sector || null,
+            industry: industry || null,
+            limit: limit
+          }
+        };
+        const res = await axios.post(`${BASE_URL}/api/fmp-screener`, screenerPayload);
+        const fetchedTickers = res.data.results.map((r: any) => r.symbol);
+        finalTickers = fetchedTickers;
+        setScreenerCount(fetchedTickers.length);
+      } catch (err: any) {
+        setErrorMsg(err.response?.data?.detail || '請求 FMP Screener API 錯誤');
+        setIsLoading(false);
+        return;
+      }
+    }
+
+    if (finalTickers.length === 0) {
+      setErrorMsg(inputMethod === 'FMP 伺服器端進階篩選' ? 'FMP 伺服器未找到符合條件的股票' : '請輸入至少一檔股票代碼或上傳 CSV！');
       setIsLoading(false);
       return;
     }
 
-    // Build payload
-    const payload = {
+    // Build payload template
+    const payloadTemplate = {
       data_source: dataSource,
       fmp_api_key: apiKey || null,
-      input_method: inputMethod,
-      tickers: finalTickers,
-      fmp_server_params: inputMethod === 'FMP 伺服器端進階篩選' ? {
-        marketCapMoreThan: mktCapMin * 1000000,
-        marketCapLowerThan: mktCapMax * 1000000,
-        priceMoreThan: priceMin,
-        priceLowerThan: priceMax,
-        volumeMoreThan: volMin * 1000000,
-        volumeLowerThan: volMax * 1000000,
-        sector: sector || null,
-        industry: industry || null,
-        limit: limit
-      } : null,
+      input_method: '手動輸入', // Always manual since we resolved tickers
+      tickers: [],
+      fmp_server_params: null,
       period: period,
       sma_window: smaWindow,
       show_sma_cols: showSmaCols,
@@ -189,15 +210,30 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
     };
 
     try {
-      const response = await axios.post(`${BASE_URL}/api/scan`, payload);
-      setResults(response.data.results);
-      if (response.data.results.length === 0) {
+      const chunkSize = 20;
+      let allResults: any[] = [];
+
+      setScanProgress({ processed: 0, total: finalTickers.length });
+
+      for (let i = 0; i < finalTickers.length; i += chunkSize) {
+        const chunk = finalTickers.slice(i, i + chunkSize);
+        const currentPayload = { ...payloadTemplate, tickers: chunk };
+
+        const response = await axios.post(`${BASE_URL}/api/scan`, currentPayload);
+        allResults = [...allResults, ...response.data.results];
+
+        setScanProgress({ processed: Math.min(i + chunkSize, finalTickers.length), total: finalTickers.length });
+      }
+
+      setResults(allResults);
+      if (allResults.length === 0) {
         setErrorMsg('掃描完成，未發現符合篩選條件的標的，請放寬條件。');
       }
     } catch (err: any) {
       setErrorMsg(err.response?.data?.detail || '請求後端 API 錯誤，請確認後端是否正常啟動。');
     } finally {
       setIsLoading(false);
+      setScanProgress(null);
     }
   };
 
@@ -227,11 +263,32 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
     }
   };
 
+  const filteredResults = results.filter(row => {
+    if (strictReturnFilter) {
+      const is1dPassed = row["1日漲幅達標"] === '✅';
+      const isNdPassed = row[`${nDaysReturn}日漲幅達標`] === '✅';
+      if (matchLogic === 'OR' && !is1dPassed && !isNdPassed) return false;
+      if (matchLogic === 'AND' && (!is1dPassed || !isNdPassed)) return false;
+    }
+
+    if (strictVolFilter) {
+      if (row["爆量達標"] !== '✅') return false;
+    }
+
+    if (strictHistoryFilter) {
+      const histKeys = ["歷史暴漲達標", "歷史假突破達標", "QullaMaggie突破達標", "單日漲幅Breakout達標"];
+      const passedAnyHist = histKeys.some(key => row[key] === '✅');
+      if (!passedAnyHist) return false;
+    }
+
+    return true;
+  });
+
   // Export results to CSV
   const handleExportCsv = () => {
-    if (results.length === 0) return;
-    const headers = Object.keys(results[0]).join(',');
-    const rows = results.map(row => 
+    if (filteredResults.length === 0) return;
+    const headers = Object.keys(filteredResults[0]).join(',');
+    const rows = filteredResults.map(row =>
       Object.values(row).map(val => {
         const str = String(val);
         return str.includes(',') ? `"${str}"` : str;
@@ -271,11 +328,11 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
               <Sliders size={14} className="text-indigo-400" />
               <span>基礎配置</span>
             </h3>
-            
+
             <div className="space-y-1">
               <label className="text-xs font-medium text-gray-500">資料來源</label>
-              <select 
-                value={dataSource} 
+              <select
+                value={dataSource}
                 onChange={(e) => setDataSource(e.target.value as any)}
                 className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
               >
@@ -291,13 +348,13 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                   if (method === 'FMP 伺服器端進階篩選' && dataSource !== 'FMP') return null;
                   return (
                     <label key={method} className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
-                      <input 
-                        type="radio" 
-                        name="inputMethod" 
-                        value={method} 
+                      <input
+                        type="radio"
+                        name="inputMethod"
+                        value={method}
                         checked={inputMethod === method}
                         onChange={() => setInputMethod(method)}
-                        className="text-indigo-600 focus:ring-indigo-500" 
+                        className="text-indigo-600 focus:ring-indigo-500"
                       />
                       <span>{method}</span>
                     </label>
@@ -321,8 +378,8 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
             {inputMethod === 'CSV 上傳' && (
               <div className="space-y-1">
                 <label className="text-xs font-medium text-gray-500">上傳 CSV 檔案 (首欄必須為股票代號)</label>
-                <input 
-                  type="file" 
+                <input
+                  type="file"
                   accept=".csv"
                   onChange={handleCsvUpload}
                   className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-xs text-gray-400 focus:outline-none focus:border-indigo-500"
@@ -353,6 +410,14 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                     <label className="text-[10px] text-gray-500 block">股價小於 ($)</label>
                     <input type="number" value={priceMax} onChange={(e) => setPriceMax(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
                   </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 block">最低成交量 (M)</label>
+                    <input type="number" value={volMin} onChange={(e) => setVolMin(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 block">最高成交量 (M)</label>
+                    <input type="number" value={volMax} onChange={(e) => setVolMax(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                  </div>
                 </div>
                 <div>
                   <label className="text-[10px] text-gray-500 block">大板塊 (Sector)</label>
@@ -374,11 +439,12 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
 
             <div className="space-y-1">
               <label className="text-xs font-medium text-gray-500">資料天數期間 (K線)</label>
-              <select 
-                value={period} 
+              <select
+                value={period}
                 onChange={(e) => setPeriod(e.target.value)}
                 className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
               >
+                <option value="1mo">1個月</option>
                 <option value="3mo">3個月</option>
                 <option value="6mo">6個月</option>
                 <option value="1y">1年</option>
@@ -393,19 +459,19 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">技術指標與顯示</h3>
             <div className="flex items-center justify-between">
               <label className="text-sm text-gray-300">SMA 移動平均天數</label>
-              <input 
-                type="number" 
-                value={smaWindow} 
+              <input
+                type="number"
+                value={smaWindow}
                 onChange={(e) => setSmaWindow(Number(e.target.value))}
                 className="w-16 bg-gray-900 border border-gray-800 rounded-xl px-2 py-1 text-sm text-center text-white"
               />
             </div>
             <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
-              <input 
-                type="checkbox" 
+              <input
+                type="checkbox"
                 checked={showSmaCols}
                 onChange={(e) => setShowSmaCols(e.target.checked)}
-                className="text-indigo-600 focus:ring-indigo-500 rounded" 
+                className="text-indigo-600 focus:ring-indigo-500 rounded"
               />
               <span>顯示 SMA 相關欄位</span>
             </label>
@@ -437,11 +503,11 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                 </select>
               </div>
               <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
-                <input 
-                  type="checkbox" 
+                <input
+                  type="checkbox"
                   checked={strictReturnFilter}
                   onChange={(e) => setStrictReturnFilter(e.target.checked)}
-                  className="text-indigo-600 focus:ring-indigo-500 rounded" 
+                  className="text-indigo-600 focus:ring-indigo-500 rounded"
                 />
                 <span>啟用嚴格漲幅過濾</span>
               </label>
@@ -453,8 +519,8 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">歷史記錄與策略模型</h3>
             <div className="space-y-2">
               <label className="text-xs text-gray-500">策略篩選器</label>
-              <select 
-                value={strategySelect} 
+              <select
+                value={strategySelect}
                 onChange={(e) => setStrategySelect(e.target.value)}
                 className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1.5 text-xs text-white"
               >
@@ -486,6 +552,44 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                     <input type="number" value={extTimeRangeMax} onChange={(e) => setExtTimeRangeMax(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-white" />
                   </div>
                 </div>
+
+                <div className="pt-2 border-t border-gray-800/60 mt-2">
+                  <label className="flex items-center space-x-2 text-sm font-medium text-gray-400 cursor-pointer mb-2">
+                    <input
+                      type="checkbox"
+                      checked={extEnableAdv}
+                      onChange={(e) => setExtEnableAdv(e.target.checked)}
+                      className="text-indigo-600 focus:ring-indigo-500 rounded"
+                    />
+                    <span>啟用未來走勢預測</span>
+                  </label>
+                  {extEnableAdv && (
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <div>
+                        <label className="text-[10px] text-gray-500 block">未來天數</label>
+                        <input type="number" value={extAdvNDays} onChange={(e) => setExtAdvNDays(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-gray-500 block">預期方向</label>
+                        <select value={extAdvRetDir} onChange={(e) => setExtAdvRetDir(e.target.value as any)} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white">
+                          <option value="漲">漲</option>
+                          <option value="跌">跌</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-gray-500 block">漲跌幅條件</label>
+                        <select value={extAdvRetType} onChange={(e) => setExtAdvRetType(e.target.value as any)} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white">
+                          <option value="大於">大於</option>
+                          <option value="小於">小於</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-gray-500 block">目標值 (%)</label>
+                        <input type="number" value={extAdvRetVal} onChange={(e) => setExtAdvRetVal(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -498,6 +602,24 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                 <div>
                   <label className="text-gray-500 block">上影線比例大於 (%)</label>
                   <input type="number" value={fbMinShadowRatio} onChange={(e) => setFbMinShadowRatio(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                </div>
+                <div>
+                  <label className="text-gray-500 block">最低成交量大於 (M)</label>
+                  <input type="number" value={fbMinVolM} onChange={(e) => setFbMinVolM(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                </div>
+                <div>
+                  <label className="text-gray-500 block">前日收盤價大於 ($)</label>
+                  <input type="number" value={fbMinPrevClose} onChange={(e) => setFbMinPrevClose(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                </div>
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div>
+                    <label className="text-[10px] text-gray-500 block">時間範圍起 (月)</label>
+                    <input type="number" value={fbTimeRangeMin} onChange={(e) => setFbTimeRangeMin(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 block">時間範圍止 (月)</label>
+                    <input type="number" value={fbTimeRangeMax} onChange={(e) => setFbTimeRangeMax(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
+                  </div>
                 </div>
               </div>
             )}
@@ -526,15 +648,15 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                   </label>
                   <input type="number" value={qmMinRet} onChange={(e) => setQmMinRet(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
                 </div>
-                
+
                 {strategySelect === '4.曾經單日漲幅Breakout' && (
                   <div className="pt-2 border-t border-gray-800/60 mt-3">
                     <label className="flex items-center space-x-2 text-sm font-medium text-gray-400 cursor-pointer mb-2">
-                      <input 
-                        type="checkbox" 
+                      <input
+                        type="checkbox"
                         checked={useBodyFilter}
                         onChange={(e) => setUseBodyFilter(e.target.checked)}
-                        className="text-indigo-600 focus:ring-indigo-500 rounded" 
+                        className="text-indigo-600 focus:ring-indigo-500 rounded"
                       />
                       <span>啟用長綠K線篩選</span>
                     </label>
@@ -550,11 +672,11 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
             )}
 
             <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
-              <input 
-                type="checkbox" 
+              <input
+                type="checkbox"
                 checked={strictHistoryFilter}
                 onChange={(e) => setStrictHistoryFilter(e.target.checked)}
-                className="text-indigo-600 focus:ring-indigo-500 rounded" 
+                className="text-indigo-600 focus:ring-indigo-500 rounded"
               />
               <span className="ml-2 text-sm text-gray-300">
                 啟用 {strategySelect === '3.QullaMaggie Breakout' ? 'QullaMaggie 突破' : '曾經單日漲幅Breakout'} 過濾 (獨立篩選)
@@ -567,23 +689,45 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">交易量爆量篩選 (RVOL)</h3>
             <div className="flex items-center justify-between">
               <label className="text-sm text-gray-300">RVOL 異常倍數</label>
-              <input 
-                type="number" 
-                value={volMultiplier} 
+              <input
+                type="number"
+                value={volMultiplier}
                 onChange={(e) => setVolMultiplier(Number(e.target.value))}
                 className="w-16 bg-gray-900 border border-gray-800 rounded-xl px-2 py-1 text-sm text-center text-white"
               />
             </div>
             <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
-              <input 
-                type="checkbox" 
+              <input
+                type="checkbox"
                 checked={strictVolFilter}
                 onChange={(e) => setStrictVolFilter(e.target.checked)}
-                className="text-indigo-600 focus:ring-indigo-500 rounded" 
+                className="text-indigo-600 focus:ring-indigo-500 rounded"
               />
               <span>僅顯示爆量達標股票</span>
             </label>
           </div>
+
+          {/* Progress & Status */}
+          {isLoading && (
+            <div className="space-y-2 bg-gray-900/50 p-4 rounded-xl border border-gray-800">
+              <div className="flex justify-between items-center text-xs text-gray-400">
+                <span className="font-semibold text-indigo-400">
+                  {screenerCount !== null ? `Screener 找到 ${screenerCount} 檔股票` : '準備中...'}
+                </span>
+                <span>
+                  {scanProgress ? `${scanProgress.processed} / ${scanProgress.total}` : ''}
+                </span>
+              </div>
+              {scanProgress && (
+                <div className="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
+                  <div
+                    className="bg-indigo-500 h-2 rounded-full transition-all duration-300 ease-out"
+                    style={{ width: `${Math.max(5, (scanProgress.processed / scanProgress.total) * 100)}%` }}
+                  ></div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Submit Button */}
           <button
@@ -592,7 +736,10 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
             className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800/40 text-white rounded-xl py-3 px-4 font-semibold text-sm shadow-lg shadow-indigo-600/35 transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
           >
             {isLoading ? (
-              <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+              <>
+                <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                <span>搜尋中...</span>
+              </>
             ) : (
               <>
                 <Play size={16} />
@@ -615,7 +762,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
               {/* Table Toolbar */}
               <div className="flex justify-between items-center p-4 border-b border-gray-800 bg-gray-950/60">
                 <span className="text-sm font-semibold text-gray-300">
-                  找到 {results.length} 檔股票符合條件
+                  找到 {filteredResults.length} 檔股票符合條件
                 </span>
                 <div className="flex items-center space-x-3">
                   <button
@@ -627,7 +774,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                   </button>
                   <button
                     onClick={() => {
-                      onSaveScan(results);
+                      onSaveScan(filteredResults);
                       alert('已成功將篩選結果儲存至歷次保存庫！');
                     }}
                     className="bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 rounded-xl px-3.5 py-2 text-xs font-semibold flex items-center space-x-2 transition-all cursor-pointer"
@@ -651,16 +798,16 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                       {showSmaCols && <th className="py-4 px-6 text-right">SMA ({smaWindow})</th>}
                       {showSmaCols && <th className="py-4 px-6 text-center">價 &gt; SMA</th>}
                       {results[0] && results[0]["1日漲幅(%)"] !== undefined && <th className="py-4 px-6 text-right">1日漲幅</th>}
-                      {results[0] && results[0]["歷史暴漲日期"] !== undefined && <th className="py-4 px-6 text-center">策略標記</th>}
-                      {results[0] && results[0]["達標日期"] !== undefined && <th className="py-4 px-6 text-center">達標日期</th>}
-                      {results[0] && results[0]["當日Volume(M)"] !== undefined && <th className="py-4 px-6 text-right">Volume(M)</th>}
-                      {results[0] && results[0]["Float(M)"] !== undefined && <th className="py-4 px-6 text-right">Float(M)</th>}
-                      {results[0] && results[0]["📰 News"] !== undefined && <th className="py-4 px-6 text-center">新聞</th>}
+                      {results[0] && Object.keys(results[0]).filter(k => 
+                        !["Ticker", "Name", "Sector", "Market Cap", "Close", "1日漲幅(%)", "📰 News", `SMA_${smaWindow}`, "Price > SMA"].includes(k)
+                      ).map((key, i) => (
+                        <th key={i} className="py-4 px-6 text-center whitespace-nowrap">{key}</th>
+                      ))}
                       <th className="py-4 px-6 text-center">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-800/80">
-                    {results.map((row, idx) => (
+                    {filteredResults.map((row, idx) => (
                       <tr key={idx} className="hover:bg-gray-800/30 transition-colors">
                         <td className="py-3.5 px-6 font-bold text-white tracking-wide">{row.Ticker}</td>
                         <td className="py-3.5 px-6 text-gray-300 font-medium truncate max-w-[150px]">{row.Name}</td>
@@ -680,37 +827,13 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                             +{row["1日漲幅(%)"]}%
                           </td>
                         )}
-                        {row["歷史暴漲日期"] !== undefined && (
-                          <td className="py-3.5 px-6 text-center text-xs text-gray-400">
-                            暴漲: {row["歷史暴漲日期"]} ({row["歷史暴漲幅度(%)"]}%)
+                        {Object.keys(results[0]).filter(k => 
+                          !["Ticker", "Name", "Sector", "Market Cap", "Close", "1日漲幅(%)", "📰 News", `SMA_${smaWindow}`, "Price > SMA"].includes(k)
+                        ).map((key, i) => (
+                          <td key={i} className={`py-3.5 px-6 text-center text-xs ${row[key] === '✅' ? 'text-green-400 font-bold' : row[key] === '❌' ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
+                            {row[key] !== null && row[key] !== undefined ? row[key] : '-'}
                           </td>
-                        )}
-                        {row["達標日期"] !== undefined && (
-                          <td className="py-3.5 px-6 text-center text-xs text-gray-300">
-                            {row["達標日期"] || '-'}
-                          </td>
-                        )}
-                        {row["當日Volume(M)"] !== undefined && (
-                          <td className="py-3.5 px-6 text-right text-gray-400">
-                            {row["當日Volume(M)"] > 0 ? row["當日Volume(M)"] : '-'}
-                          </td>
-                        )}
-                        {row["Float(M)"] !== undefined && (
-                          <td className="py-3.5 px-6 text-right text-gray-400">
-                            {row["Float(M)"]}
-                          </td>
-                        )}
-                        {row["📰 News"] !== undefined && (
-                          <td className="py-3.5 px-6 text-center">
-                            {row["📰 News"] ? (
-                              <a href={row["📰 News"]} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline text-xs">
-                                Google News
-                              </a>
-                            ) : (
-                              <span className="text-gray-600 text-xs">-</span>
-                            )}
-                          </td>
-                        )}
+                        ))}
                         <td className="py-3.5 px-6 text-center">
                           <button
                             onClick={() => handleTickerClick(row.Ticker)}
@@ -750,7 +873,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                   <span>個股技術線圖與催化劑資訊</span>
                 </h3>
               </div>
-              <button 
+              <button
                 onClick={() => setSelectedTicker(null)}
                 className="text-gray-500 hover:text-white p-2 rounded-xl hover:bg-gray-900 transition-colors cursor-pointer"
               >
@@ -800,9 +923,9 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                         {deepDiveData?.news && deepDiveData.news.length > 0 ? (
                           deepDiveData.news.map((item: any, idx: number) => (
                             <div key={idx} className="pt-4 first:pt-0 space-y-1.5">
-                              <a 
-                                href={item.url} 
-                                target="_blank" 
+                              <a
+                                href={item.url}
+                                target="_blank"
                                 rel="noreferrer"
                                 className="text-sm font-semibold text-indigo-400 hover:text-indigo-300 hover:underline leading-snug block"
                               >

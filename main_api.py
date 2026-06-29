@@ -395,6 +395,18 @@ def get_deep_dive(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class FmpScreenerRequest(BaseModel):
+    fmp_api_key: Optional[str] = None
+    params: dict = {}
+
+@app.post("/api/fmp-screener")
+def fmp_screener(req: FmpScreenerRequest):
+    key = req.fmp_api_key or os.environ.get("FMP_API_KEY", "")
+    if not key:
+        raise HTTPException(status_code=400, detail="FMP API Key is required")
+    screener_results = get_fmp_screener_tickers(key, req.params)
+    return sanitize_value({"results": screener_results})
+
 @app.post("/api/scan")
 def post_scan(req: ScanRequest):
     key = req.fmp_api_key or os.environ.get("FMP_API_KEY", "")
@@ -606,14 +618,8 @@ def post_scan(req: ScanRequest):
                 ext_date = ""
                 ext_vol = 0.0
 
-        # Apply strict filters to exclude rows
-        if req.strict_return_filter and not is_strict_passed:
-            continue
-        if req.strict_vol_filter and not cond_vol:
-            continue
-        if req.strict_history_filter and not hist_match:
-            continue
-
+        # Server-side filtering removed to allow client-side immediate toggle
+        
         market_cap_val = info.get('marketCap', 'N/A')
         if isinstance(market_cap_val, (int, float)):
             market_cap_str = f"${market_cap_val / 1e6:.2f}M"
@@ -633,46 +639,46 @@ def post_scan(req: ScanRequest):
             row_dict[f"SMA_{req.sma_window}"] = round(float(latest_data[f'SMA_{req.sma_window}']), 2)
             row_dict["Price > SMA"] = "✅" if cond_price_sma else "❌"
 
-        if req.strict_return_filter:
-            row_dict["1日漲幅(%)"] = round(r1, 2)
-            row_dict[f"{req.n_days_return}日漲幅(%)"] = round(rn, 2)
-            row_dict["1日漲幅達標"] = "✅" if cond_1d else "❌"
-            row_dict[f"{req.n_days_return}日漲幅達標"] = "✅" if cond_nd else "❌"
+        # Always attach return metrics
+        row_dict["1日漲幅(%)"] = round(r1, 2)
+        row_dict[f"{req.n_days_return}日漲幅(%)"] = round(rn, 2)
+        row_dict["1日漲幅達標"] = "✅" if cond_1d else "❌"
+        row_dict[f"{req.n_days_return}日漲幅達標"] = "✅" if cond_nd else "❌"
 
-        if req.strict_history_filter:
+        # Always attach history metrics
+        hist_col_name = "歷史暴漲達標"
+        if req.strategy_select == "1.Extended Short":
             hist_col_name = "歷史暴漲達標"
-            if req.strategy_select == "1.Extended Short":
-                hist_col_name = "歷史暴漲達標"
-                row_dict["歷史暴漲日期"] = ext_date
-                row_dict["歷史暴漲幅度(%)"] = round(ext_ret, 2)
-                if req.hist_cfg.get('enable_adv'):
-                    row_dict[f"隔{req.hist_cfg.get('adv_n_days', 1)}日漲跌幅(%)"] = adv_ret
-            elif req.strategy_select == "2.Fake Breakout Short":
-                hist_col_name = "歷史假突破達標"
-                row_dict["歷史假突破日期"] = ext_date
-                row_dict["假突破Gap(%)"] = round(ext_ret, 2)
-            elif req.strategy_select == "3.QullaMaggie Breakout":
-                hist_col_name = "QullaMaggie突破達標"
-                qm_days = int(req.hist_cfg.get('qm_days', 20))
-                row_dict[f"QM_{qm_days}日內近期漲幅(%)"] = round(qm_recent_ret, 2)
+            row_dict["歷史暴漲日期"] = ext_date
+            row_dict["歷史暴漲幅度(%)"] = round(ext_ret, 2)
+            if req.hist_cfg.get('enable_adv'):
+                row_dict[f"隔{req.hist_cfg.get('adv_n_days', 1)}日漲跌幅(%)"] = adv_ret
+        elif req.strategy_select == "2.Fake Breakout Short":
+            hist_col_name = "歷史假突破達標"
+            row_dict["歷史假突破日期"] = ext_date
+            row_dict["假突破Gap(%)"] = round(ext_ret, 2)
+        elif req.strategy_select == "3.QullaMaggie Breakout":
+            hist_col_name = "QullaMaggie突破達標"
+            qm_days = int(req.hist_cfg.get('qm_days', 20))
+            row_dict[f"QM_{qm_days}日內近期漲幅(%)"] = round(qm_recent_ret, 2)
+        else:
+            hist_col_name = "單日漲幅Breakout達標"
+            qm_days = int(req.hist_cfg.get('qm_days', 20))
+            row_dict[f"過去{qm_days}日內最大單日漲幅(%)"] = round(qm_recent_ret, 2)
+            row_dict["達標日期"] = ext_date
+            row_dict["當日Volume(M)"] = round(ext_vol, 2) if ext_vol > 0 else 0
+            
+            fm = GLOBAL_FLOATS_CACHE.get(ticker, 0) / 1e6 if GLOBAL_FLOATS_CACHE.get(ticker, 0) else 0
+            row_dict["Float(M)"] = f"{fm:.2f}M" if fm > 0 else "N/A"
+            if ext_date and hist_match:
+                row_dict["📰 News"] = f"https://www.google.com/search?tbm=nws&q={ticker}+stock+{ext_date}"
             else:
-                hist_col_name = "單日漲幅Breakout達標"
-                qm_days = int(req.hist_cfg.get('qm_days', 20))
-                row_dict[f"過去{qm_days}日內最大單日漲幅(%)"] = round(qm_recent_ret, 2)
-                row_dict["達標日期"] = ext_date
-                row_dict["當日Volume(M)"] = round(ext_vol, 2) if ext_vol > 0 else 0
-                
-                fm = GLOBAL_FLOATS_CACHE.get(ticker, 0) / 1e6 if GLOBAL_FLOATS_CACHE.get(ticker, 0) else 0
-                row_dict["Float(M)"] = f"{fm:.2f}M" if fm > 0 else "N/A"
-                if ext_date and hist_match:
-                    row_dict["📰 News"] = f"https://www.google.com/search?tbm=nws&q={ticker}+stock+{ext_date}"
-                else:
-                    row_dict["📰 News"] = ""
-            row_dict[hist_col_name] = "✅" if hist_match else "❌"
+                row_dict["📰 News"] = ""
+        row_dict[hist_col_name] = "✅" if hist_match else "❌"
 
-        if req.strict_vol_filter:
-            row_dict["RVOL (倍)"] = round(rvol, 2)
-            row_dict["爆量達標"] = "✅" if cond_vol else "❌"
+        # Always attach volume metrics
+        row_dict["RVOL (倍)"] = round(rvol, 2)
+        row_dict["爆量達標"] = "✅" if cond_vol else "❌"
 
         filtered_results.append(row_dict)
 
