@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import axios from 'axios';
 import {
   Play,
@@ -8,10 +8,31 @@ import {
   ChevronRight,
   X,
   Sliders,
-  Activity,
-  FileSpreadsheet
+  FileSpreadsheet,
+  RefreshCw
 } from 'lucide-react';
+import { AgGridReact } from 'ag-grid-react';
+import { ModuleRegistry, ClientSideRowModelModule, themeQuartz, colorSchemeDark } from 'ag-grid-community';
 import TradingViewChart from './TradingViewChart';
+
+ModuleRegistry.registerModules([ClientSideRowModelModule]);
+
+const myDarkTheme = themeQuartz.withPart(colorSchemeDark).withParams({
+  backgroundColor: '#030712',
+  foregroundColor: '#d1d5db',
+  headerBackgroundColor: '#111827',
+  headerTextColor: '#9ca3af',
+  borderColor: '#1f2937',
+  rowHoverColor: '#1f2937',
+  selectedRowBackgroundColor: 'rgba(79, 70, 229, 0.2)',
+  oddRowBackgroundColor: '#030712',
+  fontSize: 13,
+  fontFamily: 'inherit',
+  headerFontSize: 12,
+  headerFontWeight: 600,
+  cellHorizontalPadding: 16,
+  rowVerticalPaddingScale: 1,
+});
 
 interface HistoricalScannerProps {
   apiKey: string;
@@ -130,6 +151,15 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
     const saved = localStorage.getItem('HIST_showSubSidebar');
     return saved !== null ? saved === 'true' : true;
   });
+
+  const gridRef = useRef<any>(null);
+
+  const handleResetColumns = () => {
+    if (gridRef.current?.api) {
+      gridRef.current.api.resetColumnState();
+      gridRef.current.api.sizeColumnsToFit();
+    }
+  };
   const [scanProgress, setScanProgress] = useState<{ processed: number, total: number } | null>(null);
   const [screenerCount, setScreenerCount] = useState<number | null>(null);
   const [results, setResults] = useState<any[]>([]);
@@ -342,6 +372,55 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   const returnKeys = results[0] ? Object.keys(results[0]).filter(k => isReturnKey(k)) : [];
   const volKeys = results[0] ? Object.keys(results[0]).filter(k => isVolKey(k)) : [];
 
+  const colDefs = React.useMemo(() => {
+    if (filteredResults.length === 0) return [];
+
+    const baseCols: any[] = [
+      { field: 'Ticker', headerName: '代碼', pinned: 'left', minWidth: 100, cellStyle: { fontWeight: 'bold', color: '#818cf8' } },
+      { field: 'Name', headerName: '名稱', minWidth: 150 },
+      { field: 'Sector', headerName: '產業板塊', minWidth: 150 },
+      { field: 'Market Cap', headerName: '市值', minWidth: 120 },
+      { field: 'Close', headerName: '收盤價', cellRenderer: (p: any) => p.value !== null ? `$${p.value}` : '-' },
+    ];
+
+    const extraCols: any[] = [];
+    if (showSmaCols) {
+      extraCols.push({ field: `SMA_${smaWindow}`, headerName: `SMA (${smaWindow})`, cellRenderer: (p: any) => p.value !== null ? `$${p.value}` : '-' });
+      extraCols.push({ field: 'Price > SMA', headerName: '價 > SMA' });
+    }
+
+    if (strictReturnFilter) {
+      returnKeys.forEach(k => extraCols.push({ field: k, headerName: k }));
+    }
+    if (strictVolFilter) {
+      volKeys.forEach(k => extraCols.push({ field: k, headerName: k }));
+    }
+    if (strictHistoryFilter) {
+      historyKeys.forEach(k => extraCols.push({ field: k, headerName: k }));
+    }
+
+    const actionCol = {
+      headerName: '操作',
+      pinned: 'right',
+      cellRenderer: (params: any) => (
+        <div className="flex h-full w-full items-center justify-center">
+          <button
+            onClick={() => handleTickerClick(params.data.Ticker)}
+            className="bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-semibold px-2 py-1.5 rounded-lg flex items-center space-x-1 transition-colors cursor-pointer shadow-sm"
+          >
+            <span>分析 K 線</span>
+            <ChevronRight size={10} />
+          </button>
+        </div>
+      ),
+      minWidth: 120,
+      filter: false,
+      sortable: false
+    };
+
+    return [...baseCols, ...extraCols, actionCol];
+  }, [filteredResults, showSmaCols, strictReturnFilter, strictVolFilter, strictHistoryFilter, smaWindow, returnKeys, volKeys, historyKeys]);
+
   // Export results to CSV
   const handleExportCsv = () => {
     if (filteredResults.length === 0) return;
@@ -391,442 +470,442 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
         {showSubSidebar && (
           <div className="xl:col-span-1 bg-gray-950/40 p-6 rounded-2xl border border-gray-800 space-y-6 max-h-[85vh] overflow-y-auto animate-in slide-in-from-left duration-200">
             {/* Main settings */}
-          <div className="space-y-4">
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center space-x-2">
-              <Sliders size={14} className="text-indigo-400" />
-              <span>基礎配置</span>
-            </h3>
+            <div className="space-y-4">
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center space-x-2">
+                <Sliders size={14} className="text-indigo-400" />
+                <span>基礎配置</span>
+              </h3>
 
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-500">資料來源</label>
-              <select
-                value={dataSource}
-                onChange={(e) => setDataSource(e.target.value as any)}
-                className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
-              >
-                <option value="FMP">Financial Modeling Prep (FMP)</option>
-                <option value="Yahoo Finance">Yahoo Finance</option>
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-500">目標產生方式</label>
-              <div className="flex flex-col space-y-1.5 mt-1">
-                {['手動輸入', 'CSV 上傳', 'FMP 伺服器端進階篩選'].map((method) => {
-                  if (method === 'FMP 伺服器端進階篩選' && dataSource !== 'FMP') return null;
-                  return (
-                    <label key={method} className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="inputMethod"
-                        value={method}
-                        checked={inputMethod === method}
-                        onChange={() => setInputMethod(method)}
-                        className="text-indigo-600 focus:ring-indigo-500"
-                      />
-                      <span>{method}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Inputs based on selection */}
-            {inputMethod === '手動輸入' && (
               <div className="space-y-1">
-                <label className="text-xs font-medium text-gray-500">股票代碼 (逗號或換行分隔)</label>
-                <textarea
-                  value={tickersInput}
-                  onChange={(e) => setTickersInput(e.target.value)}
-                  className="w-full h-24 bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-            )}
-
-            {inputMethod === 'CSV 上傳' && (
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-gray-500">上傳 CSV 檔案 (首欄必須為股票代號)</label>
-                <input
-                  type="file"
-                  accept=".csv"
-                  onChange={handleCsvUpload}
-                  className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-xs text-gray-400 focus:outline-none focus:border-indigo-500"
-                />
-                {csvTickers.length > 0 && (
-                  <p className="text-[10px] text-green-400">已解析 {csvTickers.length} 檔代碼</p>
-                )}
-              </div>
-            )}
-
-            {inputMethod === 'FMP 伺服器端進階篩選' && (
-              <div className="space-y-3 bg-gray-900/50 p-4 rounded-xl border border-gray-800">
-                <h4 className="text-xs font-bold text-gray-400">API 伺服器過濾引數</h4>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] text-gray-500 block">最低市值 (M)</label>
-                    <NumericInput value={mktCapMin} onChange={setMktCapMin} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 block">最高市值 (M)</label>
-                    <NumericInput value={mktCapMax} onChange={setMktCapMax} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 block">股價大於 ($)</label>
-                    <NumericInput value={priceMin} onChange={setPriceMin} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 block">股價小於 ($)</label>
-                    <NumericInput value={priceMax} onChange={setPriceMax} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 block">最低成交量 (M)</label>
-                    <NumericInput value={volMin} onChange={setVolMin} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 block">最高成交量 (M)</label>
-                    <NumericInput value={volMax} onChange={setVolMax} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-[10px] text-gray-500 block">大板塊 (Sector)</label>
-                  <select value={sector} onChange={(e) => setSector(e.target.value)} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white">
-                    <option value="">全部</option>
-                    <option value="Technology">Technology</option>
-                    <option value="Healthcare">Healthcare</option>
-                    <option value="Financial Services">Financial Services</option>
-                    <option value="Energy">Energy</option>
-                    <option value="Consumer Cyclical">Consumer Cyclical</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[10px] text-gray-500 block">返回限制數量</label>
-                  <NumericInput value={limit} onChange={setLimit} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-500">資料天數期間 (K線)</label>
-              <select
-                value={period}
-                onChange={(e) => setPeriod(e.target.value)}
-                className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
-              >
-                <option value="1mo">1個月</option>
-                <option value="3mo">3個月</option>
-                <option value="6mo">6個月</option>
-                <option value="1y">1年</option>
-                <option value="2y">2年</option>
-                <option value="5y">5年</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Technical Indicators */}
-          <div className="space-y-3 pt-4 border-t border-gray-800/80">
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">技術指標與顯示</h3>
-            <div className="flex items-center justify-between">
-              <label className="text-sm text-gray-300">SMA 移動平均天數</label>
-              <NumericInput
-                value={smaWindow}
-                onChange={setSmaWindow}
-                className="w-16 bg-gray-900 border border-gray-800 rounded-xl px-2 py-1 text-sm text-center text-white"
-              />
-            </div>
-            <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showSmaCols}
-                onChange={(e) => setShowSmaCols(e.target.checked)}
-                className="text-indigo-600 focus:ring-indigo-500 rounded"
-              />
-              <span>顯示 SMA 相關欄位</span>
-            </label>
-          </div>
-
-          {/* Return Filter */}
-          <div className="space-y-4 pt-4 border-t border-gray-800/80">
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">動能漲幅篩選 (Client-Side)</h3>
-            <div className="space-y-2">
-              <div className="flex items-center space-x-3">
-                <label className="text-xs text-gray-500 whitespace-nowrap">爆量倍數 (RVOL)</label>
-                <NumericInput value={volMultiplier} onChange={setVolMultiplier} className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-sm text-white" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500">單日最低漲幅 (%)</label>
-                <NumericInput value={min1dReturn} onChange={setMin1dReturn} className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-sm text-white" />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] text-gray-500 block">區間天數 (N)</label>
-                  <NumericInput value={nDaysReturn} onChange={setNDaysReturn} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
-                </div>
-                <div>
-                  <label className="text-[10px] text-gray-500 block">N日最低漲幅 (%)</label>
-                  <NumericInput value={minNdReturn} onChange={setMinNdReturn} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 block">交集邏輯</label>
-                <select value={matchLogic} onChange={(e) => setMatchLogic(e.target.value as any)} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1.5 text-xs text-white">
-                  <option value="OR">OR (任一滿足即可)</option>
-                  <option value="AND">AND (全部條件滿足)</option>
+                <label className="text-xs font-medium text-gray-500">資料來源</label>
+                <select
+                  value={dataSource}
+                  onChange={(e) => setDataSource(e.target.value as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="FMP">Financial Modeling Prep (FMP)</option>
+                  <option value="Yahoo Finance">Yahoo Finance</option>
                 </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-500">目標產生方式</label>
+                <div className="flex flex-col space-y-1.5 mt-1">
+                  {['手動輸入', 'CSV 上傳', 'FMP 伺服器端進階篩選'].map((method) => {
+                    if (method === 'FMP 伺服器端進階篩選' && dataSource !== 'FMP') return null;
+                    return (
+                      <label key={method} className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="inputMethod"
+                          value={method}
+                          checked={inputMethod === method}
+                          onChange={() => setInputMethod(method)}
+                          className="text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>{method}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Inputs based on selection */}
+              {inputMethod === '手動輸入' && (
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-500">股票代碼 (逗號或換行分隔)</label>
+                  <textarea
+                    value={tickersInput}
+                    onChange={(e) => setTickersInput(e.target.value)}
+                    className="w-full h-24 bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              )}
+
+              {inputMethod === 'CSV 上傳' && (
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-500">上傳 CSV 檔案 (首欄必須為股票代號)</label>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={handleCsvUpload}
+                    className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-xs text-gray-400 focus:outline-none focus:border-indigo-500"
+                  />
+                  {csvTickers.length > 0 && (
+                    <p className="text-[10px] text-green-400">已解析 {csvTickers.length} 檔代碼</p>
+                  )}
+                </div>
+              )}
+
+              {inputMethod === 'FMP 伺服器端進階篩選' && (
+                <div className="space-y-3 bg-gray-900/50 p-4 rounded-xl border border-gray-800">
+                  <h4 className="text-xs font-bold text-gray-400">API 伺服器過濾引數</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-gray-500 block">最低市值 (M)</label>
+                      <NumericInput value={mktCapMin} onChange={setMktCapMin} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 block">最高市值 (M)</label>
+                      <NumericInput value={mktCapMax} onChange={setMktCapMax} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 block">股價大於 ($)</label>
+                      <NumericInput value={priceMin} onChange={setPriceMin} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 block">股價小於 ($)</label>
+                      <NumericInput value={priceMax} onChange={setPriceMax} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 block">最低成交量 (M)</label>
+                      <NumericInput value={volMin} onChange={setVolMin} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 block">最高成交量 (M)</label>
+                      <NumericInput value={volMax} onChange={setVolMax} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 block">大板塊 (Sector)</label>
+                    <select value={sector} onChange={(e) => setSector(e.target.value)} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white">
+                      <option value="">全部</option>
+                      <option value="Technology">Technology</option>
+                      <option value="Healthcare">Healthcare</option>
+                      <option value="Financial Services">Financial Services</option>
+                      <option value="Energy">Energy</option>
+                      <option value="Consumer Cyclical">Consumer Cyclical</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 block">返回限制數量</label>
+                    <NumericInput value={limit} onChange={setLimit} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-500">資料天數期間 (K線)</label>
+                <select
+                  value={period}
+                  onChange={(e) => setPeriod(e.target.value)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="1mo">1個月</option>
+                  <option value="3mo">3個月</option>
+                  <option value="6mo">6個月</option>
+                  <option value="1y">1年</option>
+                  <option value="2y">2年</option>
+                  <option value="5y">5年</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Technical Indicators */}
+            <div className="space-y-3 pt-4 border-t border-gray-800/80">
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">技術指標與顯示</h3>
+              <div className="flex items-center justify-between">
+                <label className="text-sm text-gray-300">SMA 移動平均天數</label>
+                <NumericInput
+                  value={smaWindow}
+                  onChange={setSmaWindow}
+                  className="w-16 bg-gray-900 border border-gray-800 rounded-xl px-2 py-1 text-sm text-center text-white"
+                />
               </div>
               <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={strictReturnFilter}
-                  onChange={(e) => setStrictReturnFilter(e.target.checked)}
+                  checked={showSmaCols}
+                  onChange={(e) => setShowSmaCols(e.target.checked)}
                   className="text-indigo-600 focus:ring-indigo-500 rounded"
                 />
-                <span>啟用嚴格漲幅過濾</span>
+                <span>顯示 SMA 相關欄位</span>
               </label>
             </div>
-          </div>
 
-          {/* Strategy Section */}
-          <div className="space-y-4 pt-4 border-t border-gray-800/80">
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">歷史記錄與策略模型</h3>
-            <div className="space-y-2">
-              <label className="text-xs text-gray-500">策略篩選器</label>
-              <select
-                value={strategySelect}
-                onChange={(e) => setStrategySelect(e.target.value)}
-                className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1.5 text-xs text-white"
-              >
-                <option value="1.Extended Short">1. Extended Short</option>
-                <option value="2.Fake Breakout Short">2. Fake Breakout Short</option>
-                <option value="3.QullaMaggie Breakout">3. QullaMaggie Breakout</option>
-                <option value="4.曾經單日漲幅Breakout">4. 曾經單日漲幅Breakout</option>
-              </select>
-            </div>
-
-            {/* Strategy params */}
-            {strategySelect === '1.Extended Short' && (
-              <div className="space-y-3 bg-gray-900/40 p-3 rounded-lg border border-gray-800 text-xs">
-                <div>
-                  <label className="text-gray-500 block">曾單日總漲幅大於 (%)</label>
-                  <NumericInput value={extMinDailyRet} onChange={setExtMinDailyRet} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+            {/* Return Filter */}
+            <div className="space-y-4 pt-4 border-t border-gray-800/80">
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">動能漲幅篩選 (Client-Side)</h3>
+              <div className="space-y-2">
+                <div className="flex items-center space-x-3">
+                  <label className="text-xs text-gray-500 whitespace-nowrap">爆量倍數 (RVOL)</label>
+                  <NumericInput value={volMultiplier} onChange={setVolMultiplier} className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-sm text-white" />
                 </div>
                 <div>
-                  <label className="text-gray-500 block">曾單日實體大於 (%)</label>
-                  <NumericInput value={extMinBodyRet} onChange={setExtMinBodyRet} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                  <label className="text-xs text-gray-500">單日最低漲幅 (%)</label>
+                  <NumericInput value={min1dReturn} onChange={setMin1dReturn} className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-sm text-white" />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[10px] text-gray-500">時間範圍起 (月)</label>
-                    <NumericInput value={extTimeRangeMin} onChange={setExtTimeRangeMin} className="w-full bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-white" />
+                    <label className="text-[10px] text-gray-500 block">區間天數 (N)</label>
+                    <NumericInput value={nDaysReturn} onChange={setNDaysReturn} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
                   </div>
                   <div>
-                    <label className="text-[10px] text-gray-500">時間範圍止 (月)</label>
-                    <NumericInput value={extTimeRangeMax} onChange={setExtTimeRangeMax} className="w-full bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-white" />
+                    <label className="text-[10px] text-gray-500 block">N日最低漲幅 (%)</label>
+                    <NumericInput value={minNdReturn} onChange={setMinNdReturn} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
                   </div>
                 </div>
+                <div>
+                  <label className="text-xs text-gray-500 block">交集邏輯</label>
+                  <select value={matchLogic} onChange={(e) => setMatchLogic(e.target.value as any)} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1.5 text-xs text-white">
+                    <option value="OR">OR (任一滿足即可)</option>
+                    <option value="AND">AND (全部條件滿足)</option>
+                  </select>
+                </div>
+                <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={strictReturnFilter}
+                    onChange={(e) => setStrictReturnFilter(e.target.checked)}
+                    className="text-indigo-600 focus:ring-indigo-500 rounded"
+                  />
+                  <span>啟用嚴格漲幅過濾</span>
+                </label>
+              </div>
+            </div>
 
-                <div className="pt-2 border-t border-gray-800/60 mt-2">
-                  <label className="flex items-center space-x-2 text-sm font-medium text-gray-400 cursor-pointer mb-2">
-                    <input
-                      type="checkbox"
-                      checked={extEnableAdv}
-                      onChange={(e) => setExtEnableAdv(e.target.checked)}
-                      className="text-indigo-600 focus:ring-indigo-500 rounded"
-                    />
-                    <span>啟用未來走勢預測</span>
-                  </label>
-                  {extEnableAdv && (
-                    <div className="grid grid-cols-2 gap-2 mt-2">
-                      <div>
-                        <label className="text-[10px] text-gray-500 block">未來天數</label>
-                        <NumericInput value={extAdvNDays} onChange={setExtAdvNDays} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-gray-500 block">預期方向</label>
-                        <select value={extAdvRetDir} onChange={(e) => setExtAdvRetDir(e.target.value as any)} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white">
-                          <option value="漲">漲</option>
-                          <option value="跌">跌</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-gray-500 block">漲跌幅條件</label>
-                        <select value={extAdvRetType} onChange={(e) => setExtAdvRetType(e.target.value as any)} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white">
-                          <option value="大於">大於</option>
-                          <option value="小於">小於</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-gray-500 block">目標值 (%)</label>
-                        <NumericInput value={extAdvRetVal} onChange={setExtAdvRetVal} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
-                      </div>
+            {/* Strategy Section */}
+            <div className="space-y-4 pt-4 border-t border-gray-800/80">
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">歷史記錄與策略模型</h3>
+              <div className="space-y-2">
+                <label className="text-xs text-gray-500">策略篩選器</label>
+                <select
+                  value={strategySelect}
+                  onChange={(e) => setStrategySelect(e.target.value)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1.5 text-xs text-white"
+                >
+                  <option value="1.Extended Short">1. Extended Short</option>
+                  <option value="2.Fake Breakout Short">2. Fake Breakout Short</option>
+                  <option value="3.QullaMaggie Breakout">3. QullaMaggie Breakout</option>
+                  <option value="4.曾經單日漲幅Breakout">4. 曾經單日漲幅Breakout</option>
+                </select>
+              </div>
+
+              {/* Strategy params */}
+              {strategySelect === '1.Extended Short' && (
+                <div className="space-y-3 bg-gray-900/40 p-3 rounded-lg border border-gray-800 text-xs">
+                  <div>
+                    <label className="text-gray-500 block">曾單日總漲幅大於 (%)</label>
+                    <NumericInput value={extMinDailyRet} onChange={setExtMinDailyRet} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                  </div>
+                  <div>
+                    <label className="text-gray-500 block">曾單日實體大於 (%)</label>
+                    <NumericInput value={extMinBodyRet} onChange={setExtMinBodyRet} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-gray-500">時間範圍起 (月)</label>
+                      <NumericInput value={extTimeRangeMin} onChange={setExtTimeRangeMin} className="w-full bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-white" />
                     </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {strategySelect === '2.Fake Breakout Short' && (
-              <div className="space-y-3 bg-gray-900/40 p-3 rounded-lg border border-gray-800 text-xs">
-                <div>
-                  <label className="text-gray-500 block">跳空Gap大於 (%)</label>
-                  <NumericInput value={fbMinGap} onChange={setFbMinGap} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
-                </div>
-                <div>
-                  <label className="text-gray-500 block">上影線比例大於 (%)</label>
-                  <NumericInput value={fbMinShadowRatio} onChange={setFbMinShadowRatio} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
-                </div>
-                <div>
-                  <label className="text-gray-500 block">當日成交量大於 (M)</label>
-                  <NumericInput value={fbMinVolM} onChange={setFbMinVolM} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
-                </div>
-                <div>
-                  <label className="text-gray-500 block">昨日收盤價大於 ($)</label>
-                  <NumericInput value={fbMinPrevClose} onChange={setFbMinPrevClose} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
-                </div>
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  <div>
-                    <label className="text-[10px] text-gray-500 block">時間範圍起(月)</label>
-                    <NumericInput value={fbTimeRangeMin} onChange={setFbTimeRangeMin} className="w-full bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-white" />
+                    <div>
+                      <label className="text-[10px] text-gray-500">時間範圍止 (月)</label>
+                      <NumericInput value={extTimeRangeMax} onChange={setExtTimeRangeMax} className="w-full bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-white" />
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 block">時間範圍止(月)</label>
-                    <NumericInput value={fbTimeRangeMax} onChange={setFbTimeRangeMax} className="w-full bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-white" />
-                  </div>
-                </div>
-              </div>
-            )}
 
-            {(strategySelect === '3.QullaMaggie Breakout' || strategySelect === '4.曾經單日漲幅Breakout') && (
-              <div className="space-y-3 bg-gray-900/40 p-3 rounded-lg border border-gray-800 text-xs">
-                <div>
-                  <label className="text-gray-500 block">期間天數設定</label>
-                  <select value={qmDaysInputType} onChange={(e) => setQmDaysInputType(e.target.value)} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white">
-                    <option value="依月份選擇">依月份選擇</option>
-                    <option value="手動輸入">手動輸入</option>
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 mt-3">
-                  <div className={`transition-opacity ${qmDaysInputType !== '手動輸入' ? 'opacity-50 pointer-events-none' : ''}`}>
-                    <label className="text-gray-500 block text-[10px]">自定義天數</label>
-                    <NumericInput
-                      value={qmDaysManual}
-                      onChange={setQmDaysManual}
-                      className={`w-full border border-gray-800 rounded px-2 py-1 text-white ${qmDaysInputType !== '手動輸入' ? 'bg-gray-800/50 cursor-not-allowed' : 'bg-gray-900'}`}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-gray-500 block text-[10px]">近期累計漲幅大於(%)</label>
-                    <NumericInput value={qmMinRet} onChange={setQmMinRet} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
-                  </div>
-                </div>
-
-                {qmDaysInputType === '依月份選擇' && (
-                  <select value={qmSelMonth} onChange={(e) => setQmSelMonth(e.target.value)} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white">
-                    <option value="1個月">1個月 (21日)</option>
-                    <option value="3個月">3個月 (63日)</option>
-                    <option value="6個月">6個月 (126日)</option>
-                  </select>
-                )}
-
-                {strategySelect === '4.曾經單日漲幅Breakout' && (
-                  <div className="pt-2 border-t border-gray-800/60 mt-3">
+                  <div className="pt-2 border-t border-gray-800/60 mt-2">
                     <label className="flex items-center space-x-2 text-sm font-medium text-gray-400 cursor-pointer mb-2">
                       <input
                         type="checkbox"
-                        checked={useBodyFilter}
-                        onChange={(e) => setUseBodyFilter(e.target.checked)}
+                        checked={extEnableAdv}
+                        onChange={(e) => setExtEnableAdv(e.target.checked)}
                         className="text-indigo-600 focus:ring-indigo-500 rounded"
                       />
-                      <span>啟用長綠K線篩選</span>
+                      <span>啟用未來走勢預測</span>
                     </label>
-                    {useBodyFilter && (
-                      <div>
-                        <label className="text-gray-500 block text-[10px]">實體長度大於(%)</label>
-                        <NumericInput value={minBodyRet} onChange={setMinBodyRet} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                    {extEnableAdv && (
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        <div>
+                          <label className="text-[10px] text-gray-500 block">未來天數</label>
+                          <NumericInput value={extAdvNDays} onChange={setExtAdvNDays} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-gray-500 block">預期方向</label>
+                          <select value={extAdvRetDir} onChange={(e) => setExtAdvRetDir(e.target.value as any)} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white">
+                            <option value="漲">漲</option>
+                            <option value="跌">跌</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-gray-500 block">漲跌幅條件</label>
+                          <select value={extAdvRetType} onChange={(e) => setExtAdvRetType(e.target.value as any)} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white">
+                            <option value="大於">大於</option>
+                            <option value="小於">小於</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-gray-500 block">目標值 (%)</label>
+                          <NumericInput value={extAdvRetVal} onChange={setExtAdvRetVal} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
+                        </div>
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {strategySelect === '2.Fake Breakout Short' && (
+                <div className="space-y-3 bg-gray-900/40 p-3 rounded-lg border border-gray-800 text-xs">
+                  <div>
+                    <label className="text-gray-500 block">跳空Gap大於 (%)</label>
+                    <NumericInput value={fbMinGap} onChange={setFbMinGap} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                  </div>
+                  <div>
+                    <label className="text-gray-500 block">上影線比例大於 (%)</label>
+                    <NumericInput value={fbMinShadowRatio} onChange={setFbMinShadowRatio} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                  </div>
+                  <div>
+                    <label className="text-gray-500 block">當日成交量大於 (M)</label>
+                    <NumericInput value={fbMinVolM} onChange={setFbMinVolM} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                  </div>
+                  <div>
+                    <label className="text-gray-500 block">昨日收盤價大於 ($)</label>
+                    <NumericInput value={fbMinPrevClose} onChange={setFbMinPrevClose} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <div>
+                      <label className="text-[10px] text-gray-500 block">時間範圍起(月)</label>
+                      <NumericInput value={fbTimeRangeMin} onChange={setFbTimeRangeMin} className="w-full bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-white" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 block">時間範圍止(月)</label>
+                      <NumericInput value={fbTimeRangeMax} onChange={setFbTimeRangeMax} className="w-full bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-white" />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(strategySelect === '3.QullaMaggie Breakout' || strategySelect === '4.曾經單日漲幅Breakout') && (
+                <div className="space-y-3 bg-gray-900/40 p-3 rounded-lg border border-gray-800 text-xs">
+                  <div>
+                    <label className="text-gray-500 block">期間天數設定</label>
+                    <select value={qmDaysInputType} onChange={(e) => setQmDaysInputType(e.target.value)} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white">
+                      <option value="依月份選擇">依月份選擇</option>
+                      <option value="手動輸入">手動輸入</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 mt-3">
+                    <div className={`transition-opacity ${qmDaysInputType !== '手動輸入' ? 'opacity-50 pointer-events-none' : ''}`}>
+                      <label className="text-gray-500 block text-[10px]">自定義天數</label>
+                      <NumericInput
+                        value={qmDaysManual}
+                        onChange={setQmDaysManual}
+                        className={`w-full border border-gray-800 rounded px-2 py-1 text-white ${qmDaysInputType !== '手動輸入' ? 'bg-gray-800/50 cursor-not-allowed' : 'bg-gray-900'}`}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-gray-500 block text-[10px]">近期累計漲幅大於(%)</label>
+                      <NumericInput value={qmMinRet} onChange={setQmMinRet} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
+                    </div>
+                  </div>
+
+                  {qmDaysInputType === '依月份選擇' && (
+                    <select value={qmSelMonth} onChange={(e) => setQmSelMonth(e.target.value)} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white">
+                      <option value="1個月">1個月 (21日)</option>
+                      <option value="3個月">3個月 (63日)</option>
+                      <option value="6個月">6個月 (126日)</option>
+                    </select>
+                  )}
+
+                  {strategySelect === '4.曾經單日漲幅Breakout' && (
+                    <div className="pt-2 border-t border-gray-800/60 mt-3">
+                      <label className="flex items-center space-x-2 text-sm font-medium text-gray-400 cursor-pointer mb-2">
+                        <input
+                          type="checkbox"
+                          checked={useBodyFilter}
+                          onChange={(e) => setUseBodyFilter(e.target.checked)}
+                          className="text-indigo-600 focus:ring-indigo-500 rounded"
+                        />
+                        <span>啟用長綠K線篩選</span>
+                      </label>
+                      {useBodyFilter && (
+                        <div>
+                          <label className="text-gray-500 block text-[10px]">實體長度大於(%)</label>
+                          <NumericInput value={minBodyRet} onChange={setMinBodyRet} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={strictHistoryFilter}
+                  onChange={(e) => setStrictHistoryFilter(e.target.checked)}
+                  className="text-indigo-600 focus:ring-indigo-500 rounded"
+                />
+                <span className="ml-2 text-sm text-gray-300">
+                  啟用 {strategySelect === '3.QullaMaggie Breakout' ? 'QullaMaggie 突破' : '曾經單日漲幅Breakout'} 過濾 (獨立篩選)
+                </span>
+              </label>
+            </div>
+
+            {/* RVOL Volume */}
+            <div className="space-y-3 pt-4 border-t border-gray-800/80">
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">交易量爆量篩選 (RVOL)</h3>
+              <div className="flex items-center justify-between">
+                <label className="text-sm text-gray-300">RVOL 異常倍數</label>
+                <input
+                  type="number"
+                  value={volMultiplier}
+                  onChange={(e) => setVolMultiplier(Number(e.target.value))}
+                  className="w-16 bg-gray-900 border border-gray-800 rounded-xl px-2 py-1 text-sm text-center text-white"
+                />
+              </div>
+              <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={strictVolFilter}
+                  onChange={(e) => setStrictVolFilter(e.target.checked)}
+                  className="text-indigo-600 focus:ring-indigo-500 rounded"
+                />
+                <span>僅顯示爆量達標股票</span>
+              </label>
+            </div>
+
+            {/* Progress & Status */}
+            {isLoading && (
+              <div className="space-y-2 bg-gray-900/50 p-4 rounded-xl border border-gray-800">
+                <div className="flex justify-between items-center text-xs text-gray-400">
+                  <span className="font-semibold text-indigo-400">
+                    {screenerCount !== null ? `Screener 找到 ${screenerCount} 檔股票` : '準備中...'}
+                  </span>
+                  <span>
+                    {scanProgress ? `${scanProgress.processed} / ${scanProgress.total}` : ''}
+                  </span>
+                </div>
+                {scanProgress && (
+                  <div className="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-indigo-500 h-2 rounded-full transition-all duration-300 ease-out"
+                      style={{ width: `${Math.max(5, (scanProgress.processed / scanProgress.total) * 100)}%` }}
+                    ></div>
                   </div>
                 )}
               </div>
             )}
 
-            <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={strictHistoryFilter}
-                onChange={(e) => setStrictHistoryFilter(e.target.checked)}
-                className="text-indigo-600 focus:ring-indigo-500 rounded"
-              />
-              <span className="ml-2 text-sm text-gray-300">
-                啟用 {strategySelect === '3.QullaMaggie Breakout' ? 'QullaMaggie 突破' : '曾經單日漲幅Breakout'} 過濾 (獨立篩選)
-              </span>
-            </label>
-          </div>
-
-          {/* RVOL Volume */}
-          <div className="space-y-3 pt-4 border-t border-gray-800/80">
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">交易量爆量篩選 (RVOL)</h3>
-            <div className="flex items-center justify-between">
-              <label className="text-sm text-gray-300">RVOL 異常倍數</label>
-              <input
-                type="number"
-                value={volMultiplier}
-                onChange={(e) => setVolMultiplier(Number(e.target.value))}
-                className="w-16 bg-gray-900 border border-gray-800 rounded-xl px-2 py-1 text-sm text-center text-white"
-              />
-            </div>
-            <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={strictVolFilter}
-                onChange={(e) => setStrictVolFilter(e.target.checked)}
-                className="text-indigo-600 focus:ring-indigo-500 rounded"
-              />
-              <span>僅顯示爆量達標股票</span>
-            </label>
-          </div>
-
-          {/* Progress & Status */}
-          {isLoading && (
-            <div className="space-y-2 bg-gray-900/50 p-4 rounded-xl border border-gray-800">
-              <div className="flex justify-between items-center text-xs text-gray-400">
-                <span className="font-semibold text-indigo-400">
-                  {screenerCount !== null ? `Screener 找到 ${screenerCount} 檔股票` : '準備中...'}
-                </span>
-                <span>
-                  {scanProgress ? `${scanProgress.processed} / ${scanProgress.total}` : ''}
-                </span>
-              </div>
-              {scanProgress && (
-                <div className="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
-                  <div
-                    className="bg-indigo-500 h-2 rounded-full transition-all duration-300 ease-out"
-                    style={{ width: `${Math.max(5, (scanProgress.processed / scanProgress.total) * 100)}%` }}
-                  ></div>
-                </div>
+            {/* Submit Button */}
+            <button
+              onClick={handleStartScan}
+              disabled={isLoading}
+              className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800/40 text-white rounded-xl py-3 px-4 font-semibold text-sm shadow-lg shadow-indigo-600/35 transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
+            >
+              {isLoading ? (
+                <>
+                  <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  <span>搜尋中...</span>
+                </>
+              ) : (
+                <>
+                  <Play size={16} />
+                  <span>開始統一搜尋 🚀</span>
+                </>
               )}
-            </div>
-          )}
-
-          {/* Submit Button */}
-          <button
-            onClick={handleStartScan}
-            disabled={isLoading}
-            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800/40 text-white rounded-xl py-3 px-4 font-semibold text-sm shadow-lg shadow-indigo-600/35 transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
-          >
-            {isLoading ? (
-              <>
-                <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                <span>搜尋中...</span>
-              </>
-            ) : (
-              <>
-                <Play size={16} />
-                <span>開始統一搜尋 🚀</span>
-              </>
-            )}
-          </button>
-        </div>
+            </button>
+          </div>
         )}
 
         {/* Right Side: Data View Column */}
@@ -845,6 +924,14 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                   找到 {filteredResults.length} 檔股票符合條件
                 </span>
                 <div className="flex items-center space-x-3">
+                  <button
+                    onClick={handleResetColumns}
+                    title="重置欄位大小"
+                    className="bg-gray-900 hover:bg-gray-800 text-gray-400 border border-gray-800 rounded-xl px-3.5 py-2 text-xs font-semibold flex items-center space-x-2 transition-all cursor-pointer"
+                  >
+                    <RefreshCw size={13} />
+                    <span>重置欄位</span>
+                  </button>
                   <button
                     onClick={handleExportCsv}
                     className="bg-gray-900 hover:bg-gray-800 text-gray-200 border border-gray-800 rounded-xl px-3.5 py-2 text-xs font-semibold flex items-center space-x-2 transition-all cursor-pointer"
@@ -866,73 +953,26 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
               </div>
 
               {/* Table Data */}
-              <div className="overflow-x-auto overflow-y-auto flex-1 max-h-[70vh]">
-                <table className="w-full text-left border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-gray-900/60 border-b border-gray-800 text-xs font-semibold text-gray-400 uppercase">
-                      <th className="py-4 px-6">代碼</th>
-                      <th className="py-4 px-6">名稱</th>
-                      <th className="py-4 px-6">產業板塊</th>
-                      <th className="py-4 px-6">市值</th>
-                      <th className="py-4 px-6 text-right">收盤價</th>
-                      {showSmaCols && <th className="py-4 px-6 text-center whitespace-nowrap">SMA ({smaWindow})</th>}
-                      {showSmaCols && <th className="py-4 px-6 text-center whitespace-nowrap">價 &gt; SMA</th>}
-                      {strictReturnFilter && returnKeys.map(key => (
-                        <th key={key} className="py-4 px-6 text-center whitespace-nowrap">{key}</th>
-                      ))}
-                      {strictVolFilter && volKeys.map(key => (
-                        <th key={key} className="py-4 px-6 text-center whitespace-nowrap">{key}</th>
-                      ))}
-                      {strictHistoryFilter && historyKeys.map(key => (
-                        <th key={key} className="py-4 px-6 text-center whitespace-nowrap">{key}</th>
-                      ))}
-                      <th className="py-4 px-6 text-center">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-800/80">
-                    {filteredResults.map((row, idx) => (
-                      <tr key={idx} className="hover:bg-gray-800/30 transition-colors">
-                        <td className="py-3.5 px-6 font-bold text-white tracking-wide">{row.Ticker}</td>
-                        <td className="py-3.5 px-6 text-gray-300 font-medium truncate max-w-[150px]">{row.Name}</td>
-                        <td className="py-3.5 px-6 text-gray-400">{row.Sector}</td>
-                        <td className="py-3.5 px-6 text-gray-400">{row["Market Cap"]}</td>
-                        <td className="py-3.5 px-6 text-right font-semibold text-gray-100">${row.Close}</td>
-                        {showSmaCols && <td className="py-3.5 px-6 text-center text-gray-400">${row[`SMA_${smaWindow}`]}</td>}
-                        {showSmaCols && (
-                          <td className="py-3.5 px-6 text-center">
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${row["Price > SMA"] === '✅' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
-                              {row["Price > SMA"]}
-                            </span>
-                          </td>
-                        )}
-                        {strictReturnFilter && returnKeys.map(key => (
-                          <td key={key} className={`py-3.5 px-6 text-center text-xs ${row[key] === '✅' ? 'text-green-400 font-bold' : row[key] === '❌' ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
-                            {row[key] !== null && row[key] !== undefined ? row[key] : '-'}
-                          </td>
-                        ))}
-                        {strictVolFilter && volKeys.map(key => (
-                          <td key={key} className={`py-3.5 px-6 text-center text-xs ${row[key] === '✅' ? 'text-green-400 font-bold' : row[key] === '❌' ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
-                            {row[key] !== null && row[key] !== undefined ? row[key] : '-'}
-                          </td>
-                        ))}
-                        {strictHistoryFilter && historyKeys.map(key => (
-                          <td key={key} className={`py-3.5 px-6 text-center text-xs ${row[key] === '✅' ? 'text-green-400 font-bold' : row[key] === '❌' ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
-                            {row[key] !== null && row[key] !== undefined ? row[key] : '-'}
-                          </td>
-                        ))}
-                        <td className="py-3.5 px-6 text-center">
-                          <button
-                            onClick={() => handleTickerClick(row.Ticker)}
-                            className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center space-x-1 mx-auto transition-colors cursor-pointer"
-                          >
-                            <span>分析 K 線</span>
-                            <ChevronRight size={12} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="flex-1 w-full" style={{ minHeight: '60vh' }}>
+                <AgGridReact
+                  ref={gridRef}
+                  theme={myDarkTheme}
+                  rowData={filteredResults}
+                  columnDefs={colDefs}
+                  defaultColDef={{
+                    sortable: true,
+                    filter: true,
+                    resizable: true,
+                    flex: 1,
+                    minWidth: 120,
+                    cellStyle: { display: 'flex', alignItems: 'center' }
+                  }}
+                  rowSelection="single"
+                  animateRows={true}
+                  domLayout="normal"
+                  headerHeight={48}
+                  rowHeight={48}
+                />
               </div>
             </div>
           ) : (
