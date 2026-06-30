@@ -66,6 +66,8 @@ GAINERS_CACHE: Dict[str, Any] = {
 LAST_API_KEY: str = ""
 # Last autoRefreshMins setting (used to control gainers refresh interval)
 LAST_AUTO_REFRESH_MINS: int = 1
+# Track the last time RealTimeScreener sent a tick (used for lazy keep-alive)
+LAST_SCREENER_REQUEST_TIME: float = 0.0
 # ─────────────────────────────────────────────────────────────────────────────
 
 # [DEPRECATED] Legacy SCREENER_CACHE kept for /api/screener/realtime backward compat
@@ -108,7 +110,7 @@ def background_gainers_refresh_thread():
     K-line data or manages a warming/ready state machine. The frontend drives tick updates
     directly every 5 seconds via /api/screener/tick.
     """
-    global GAINERS_CACHE, GLOBAL_FLOATS_CACHE, LAST_API_KEY, LAST_AUTO_REFRESH_MINS
+    global GAINERS_CACHE, GLOBAL_FLOATS_CACHE, LAST_API_KEY, LAST_AUTO_REFRESH_MINS, LAST_SCREENER_REQUEST_TIME
 
     print("Background gainers refresh thread started.", flush=True)
 
@@ -120,12 +122,17 @@ def background_gainers_refresh_thread():
             refresh_interval_secs = LAST_AUTO_REFRESH_MINS * 60
             last_updated = GAINERS_CACHE.get("updated_at")
             secs_since_update = (now - last_updated).total_seconds() if last_updated else 99999
+            
+            # Lazy Keep-Alive: skip if screener hasn't ticked recently
+            secs_since_tick = time.time() - LAST_SCREENER_REQUEST_TIME
+            sleep_threshold_secs = (LAST_AUTO_REFRESH_MINS + 3) * 60
 
             key = LAST_API_KEY or os.environ.get("FMP_API_KEY", "")
             should_refresh = (
                 now.second == 3
                 and key
                 and secs_since_update >= refresh_interval_secs
+                and secs_since_tick <= sleep_threshold_secs
             )
 
             if should_refresh:
@@ -700,15 +707,16 @@ def post_screener_tick(req: RealtimeTickRequest):
     3. Calculates recent N-minute max gain from the ring buffer
     4. Updates watchlist (including watchlist-only tickers no longer in gainers)
     """
-    global LAST_API_KEY, LAST_AUTO_REFRESH_MINS, PRICE_BUFFER
+    global LAST_API_KEY, LAST_AUTO_REFRESH_MINS, PRICE_BUFFER, LAST_SCREENER_REQUEST_TIME
 
     key = req.fmp_api_key or os.environ.get("FMP_API_KEY", "")
     if not key:
         raise HTTPException(status_code=400, detail="FMP API Key is required.")
 
-    # Update API key and refresh interval for the background thread
+    # Update API key, refresh interval, and lazy keep-alive tracking
     LAST_API_KEY = key
     LAST_AUTO_REFRESH_MINS = req.auto_refresh_mins
+    LAST_SCREENER_REQUEST_TIME = time.time()
 
     # 1. Decide tickers: gainers ∪ watchlist (deduped, gainers first)
     gainers_tickers = list(GAINERS_CACHE.get("tickers", []))

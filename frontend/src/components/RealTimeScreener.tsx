@@ -581,20 +581,47 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
 
             <div className="space-y-3 pt-6 border-t border-gray-800/80">
               {activeSubTab === 'dashboard' ? (
-                <button
-                  onClick={handleManualClick}
-                  disabled={isLoading}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800/40 text-white rounded-xl py-3 px-4 font-semibold text-sm shadow-lg shadow-indigo-600/35 transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
-                >
-                  {isLoading ? (
-                    <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                <div className="flex flex-col space-y-2">
+                  {!hasStarted ? (
+                    <button
+                      onClick={handleManualClick}
+                      disabled={isLoading}
+                      className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800/40 text-white rounded-xl py-3 px-4 font-semibold text-sm shadow-lg shadow-indigo-600/35 transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
+                    >
+                      {isLoading ? (
+                        <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                      ) : (
+                        <>
+                          <RefreshCw size={16} />
+                          <span>開始雷達掃描 (啟動自動更新)</span>
+                        </>
+                      )}
+                    </button>
                   ) : (
-                    <>
-                      <RefreshCw size={16} />
-                      <span>手動更新雷達</span>
-                    </>
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={handleManualClick}
+                        disabled={isLoading}
+                        className="w-full bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 text-white rounded-xl py-3 px-4 font-semibold text-xs shadow-lg transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
+                      >
+                        {isLoading ? (
+                          <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        ) : (
+                          <>
+                            <RefreshCw size={14} />
+                            <span>強制更新</span>
+                          </>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => setHasStarted(false)}
+                        className="w-full bg-red-600 hover:bg-red-500 text-white rounded-xl py-3 px-4 font-semibold text-xs shadow-lg shadow-red-600/30 transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
+                      >
+                        停止雷達掃描
+                      </button>
+                    </div>
                   )}
-                </button>
+                </div>
               ) : (
                 <button
                   onClick={() => setActiveSubTab('dashboard')}
