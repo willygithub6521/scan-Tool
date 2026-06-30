@@ -251,7 +251,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
       );
       setChartData(histResponse.data.data);
 
-      // 2. Fetch deep dive news and quote
+      // 2. Fetch deep dive news
       const diveResponse = await axios.get(
         `${BASE_URL}/api/stocks/${ticker}/deep-dive?provider=${dataSource}&api_key=${apiKey}`
       );
@@ -897,22 +897,6 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
 
                   {/* Right: Info and News Catalyst */}
                   <div className="lg:col-span-1 space-y-6 bg-gray-900/40 border border-gray-800 p-6 rounded-2xl">
-                    {/* Live Metric */}
-                    {deepDiveData?.aftermarket_quote && Object.keys(deepDiveData.aftermarket_quote).length > 0 && (
-                      <div className="bg-gray-900/60 p-4 rounded-xl border border-gray-800/80">
-                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center space-x-1.5">
-                          <Activity size={12} className="text-orange-400" />
-                          <span>🌙 盤後報價 (After-Market)</span>
-                        </h4>
-                        <div className="flex justify-between items-end">
-                          <span className="text-2xl font-bold text-white">${deepDiveData.aftermarket_quote.price}</span>
-                          <span className={`text-xs font-semibold px-2 py-0.5 rounded ${deepDiveData.aftermarket_quote.change >= 0 ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
-                            {deepDiveData.aftermarket_quote.change >= 0 ? '+' : ''}{deepDiveData.aftermarket_quote.change} ({deepDiveData.aftermarket_quote.changesPercentage}%)
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
                     {/* Stock news */}
                     <div className="space-y-4">
                       <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center space-x-1.5">

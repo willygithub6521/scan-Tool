@@ -433,6 +433,12 @@ def post_scan(req: ScanRequest):
         if not tickers:
             return sanitize_value({"results": []})
 
+    if req.strategy_select == "4.曾經單日漲幅Breakout" and key:
+        try:
+            get_floats_optimized(key, tickers)
+        except Exception as e:
+            print(f"Error fetching floats in post_scan: {e}")
+
     # Step 2: Parallel fetch and process K-lines
     temp_results = []
     
