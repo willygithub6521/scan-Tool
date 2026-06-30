@@ -284,6 +284,19 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
     return true;
   });
 
+  const isReturnKey = (k: string) => /^\d+日漲幅\(%\)$/.test(k) || /^\d+日漲幅達標$/.test(k);
+  const isVolKey = (k: string) => k === "RVOL (倍)" || k === "爆量達標";
+  const isBaseKey = (k: string) => ["Ticker", "Name", "Sector", "Market Cap", "Close"].includes(k);
+  const isSmaKey = (k: string) => k.startsWith("SMA_") || k === "Price > SMA";
+  const isNewsKey = (k: string) => k === "📰 News";
+
+  const historyKeys = results[0] ? Object.keys(results[0]).filter(k => 
+    !isBaseKey(k) && !isSmaKey(k) && !isReturnKey(k) && !isVolKey(k) && !isNewsKey(k)
+  ) : [];
+
+  const returnKeys = results[0] ? Object.keys(results[0]).filter(k => isReturnKey(k)) : [];
+  const volKeys = results[0] ? Object.keys(results[0]).filter(k => isVolKey(k)) : [];
+
   // Export results to CSV
   const handleExportCsv = () => {
     if (filteredResults.length === 0) return;
@@ -795,13 +808,16 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                       <th className="py-4 px-6">產業板塊</th>
                       <th className="py-4 px-6">市值</th>
                       <th className="py-4 px-6 text-right">收盤價</th>
-                      {showSmaCols && <th className="py-4 px-6 text-right">SMA ({smaWindow})</th>}
-                      {showSmaCols && <th className="py-4 px-6 text-center">價 &gt; SMA</th>}
-                      {results[0] && results[0]["1日漲幅(%)"] !== undefined && <th className="py-4 px-6 text-right">1日漲幅</th>}
-                      {results[0] && Object.keys(results[0]).filter(k => 
-                        !["Ticker", "Name", "Sector", "Market Cap", "Close", "1日漲幅(%)", "📰 News", `SMA_${smaWindow}`, "Price > SMA"].includes(k)
-                      ).map((key, i) => (
-                        <th key={i} className="py-4 px-6 text-center whitespace-nowrap">{key}</th>
+                      {showSmaCols && <th className="py-4 px-6 text-center whitespace-nowrap">SMA ({smaWindow})</th>}
+                      {showSmaCols && <th className="py-4 px-6 text-center whitespace-nowrap">價 &gt; SMA</th>}
+                      {strictReturnFilter && returnKeys.map(key => (
+                        <th key={key} className="py-4 px-6 text-center whitespace-nowrap">{key}</th>
+                      ))}
+                      {strictVolFilter && volKeys.map(key => (
+                        <th key={key} className="py-4 px-6 text-center whitespace-nowrap">{key}</th>
+                      ))}
+                      {strictHistoryFilter && historyKeys.map(key => (
+                        <th key={key} className="py-4 px-6 text-center whitespace-nowrap">{key}</th>
                       ))}
                       <th className="py-4 px-6 text-center">操作</th>
                     </tr>
@@ -814,7 +830,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                         <td className="py-3.5 px-6 text-gray-400">{row.Sector}</td>
                         <td className="py-3.5 px-6 text-gray-400">{row["Market Cap"]}</td>
                         <td className="py-3.5 px-6 text-right font-semibold text-gray-100">${row.Close}</td>
-                        {showSmaCols && <td className="py-3.5 px-6 text-right text-gray-400">${row[`SMA_${smaWindow}`]}</td>}
+                        {showSmaCols && <td className="py-3.5 px-6 text-center text-gray-400">${row[`SMA_${smaWindow}`]}</td>}
                         {showSmaCols && (
                           <td className="py-3.5 px-6 text-center">
                             <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${row["Price > SMA"] === '✅' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
@@ -822,15 +838,18 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                             </span>
                           </td>
                         )}
-                        {row["1日漲幅(%)"] !== undefined && (
-                          <td className="py-3.5 px-6 text-right font-medium text-green-400">
-                            +{row["1日漲幅(%)"]}%
+                        {strictReturnFilter && returnKeys.map(key => (
+                          <td key={key} className={`py-3.5 px-6 text-center text-xs ${row[key] === '✅' ? 'text-green-400 font-bold' : row[key] === '❌' ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
+                            {row[key] !== null && row[key] !== undefined ? row[key] : '-'}
                           </td>
-                        )}
-                        {Object.keys(results[0]).filter(k => 
-                          !["Ticker", "Name", "Sector", "Market Cap", "Close", "1日漲幅(%)", "📰 News", `SMA_${smaWindow}`, "Price > SMA"].includes(k)
-                        ).map((key, i) => (
-                          <td key={i} className={`py-3.5 px-6 text-center text-xs ${row[key] === '✅' ? 'text-green-400 font-bold' : row[key] === '❌' ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
+                        ))}
+                        {strictVolFilter && volKeys.map(key => (
+                          <td key={key} className={`py-3.5 px-6 text-center text-xs ${row[key] === '✅' ? 'text-green-400 font-bold' : row[key] === '❌' ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
+                            {row[key] !== null && row[key] !== undefined ? row[key] : '-'}
+                          </td>
+                        ))}
+                        {strictHistoryFilter && historyKeys.map(key => (
+                          <td key={key} className={`py-3.5 px-6 text-center text-xs ${row[key] === '✅' ? 'text-green-400 font-bold' : row[key] === '❌' ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
                             {row[key] !== null && row[key] !== undefined ? row[key] : '-'}
                           </td>
                         ))}
