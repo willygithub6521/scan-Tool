@@ -19,6 +19,47 @@ interface HistoricalScannerProps {
   BASE_URL: string;
 }
 
+// ─── NumericInput: prevents React forcing 0 when input is cleared ────────────
+interface NumericInputProps {
+  value: number;
+  onChange: (val: number) => void;
+  step?: number;
+  min?: number;
+  className?: string;
+  placeholder?: string;
+}
+
+const NumericInput: React.FC<NumericInputProps> = ({
+  value, onChange, step, min, className, placeholder
+}) => {
+  // Local string buffer lets the user freely clear/type without React snapping back to 0
+  const [localVal, setLocalVal] = React.useState(String(value));
+
+  // Sync when external state changes (e.g. reset)
+  React.useEffect(() => {
+    setLocalVal(String(value));
+  }, [value]);
+
+  return (
+    <input
+      type="number"
+      step={step}
+      min={min}
+      placeholder={placeholder}
+      value={localVal}
+      onChange={(e) => setLocalVal(e.target.value)}
+      onBlur={() => {
+        const parsed = parseFloat(localVal);
+        const committed = isNaN(parsed) ? 0 : parsed;
+        setLocalVal(String(committed));
+        onChange(committed);
+      }}
+      className={className}
+    />
+  );
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, onSaveScan, BASE_URL }) => {
   // Config state
   const [dataSource, setDataSource] = useState<'FMP' | 'Yahoo Finance'>('FMP');
@@ -73,7 +114,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   // QullaMaggie Breakout & Single Day Breakout
   const [qmDaysInputType, setQmDaysInputType] = useState('依月份選擇');
   const [qmSelMonth, setQmSelMonth] = useState('3個月');
-  const [qmDaysManual, setQmDaysManual] = useState(20);
+  const [qmDaysManual, setQmDaysManual] = useState<number>(20);
   const [qmMinRet, setQmMinRet] = useState<number>(30.0);
   const [useBodyFilter, setUseBodyFilter] = useState<boolean>(false);
   const [minBodyRet, setMinBodyRet] = useState<number>(15.0);
@@ -409,27 +450,27 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-[10px] text-gray-500 block">最低市值 (M)</label>
-                    <input type="number" value={mktCapMin} onChange={(e) => setMktCapMin(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                    <NumericInput value={mktCapMin} onChange={setMktCapMin} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
                   </div>
                   <div>
                     <label className="text-[10px] text-gray-500 block">最高市值 (M)</label>
-                    <input type="number" value={mktCapMax} onChange={(e) => setMktCapMax(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                    <NumericInput value={mktCapMax} onChange={setMktCapMax} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
                   </div>
                   <div>
                     <label className="text-[10px] text-gray-500 block">股價大於 ($)</label>
-                    <input type="number" value={priceMin} onChange={(e) => setPriceMin(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                    <NumericInput value={priceMin} onChange={setPriceMin} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
                   </div>
                   <div>
                     <label className="text-[10px] text-gray-500 block">股價小於 ($)</label>
-                    <input type="number" value={priceMax} onChange={(e) => setPriceMax(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                    <NumericInput value={priceMax} onChange={setPriceMax} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
                   </div>
                   <div>
                     <label className="text-[10px] text-gray-500 block">最低成交量 (M)</label>
-                    <input type="number" value={volMin} onChange={(e) => setVolMin(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                    <NumericInput value={volMin} onChange={setVolMin} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
                   </div>
                   <div>
                     <label className="text-[10px] text-gray-500 block">最高成交量 (M)</label>
-                    <input type="number" value={volMax} onChange={(e) => setVolMax(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                    <NumericInput value={volMax} onChange={setVolMax} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
                   </div>
                 </div>
                 <div>
@@ -445,7 +486,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                 </div>
                 <div>
                   <label className="text-[10px] text-gray-500 block">返回限制數量</label>
-                  <input type="number" value={limit} onChange={(e) => setLimit(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                  <NumericInput value={limit} onChange={setLimit} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
                 </div>
               </div>
             )}
@@ -472,10 +513,9 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">技術指標與顯示</h3>
             <div className="flex items-center justify-between">
               <label className="text-sm text-gray-300">SMA 移動平均天數</label>
-              <input
-                type="number"
+              <NumericInput
                 value={smaWindow}
-                onChange={(e) => setSmaWindow(Number(e.target.value))}
+                onChange={setSmaWindow}
                 className="w-16 bg-gray-900 border border-gray-800 rounded-xl px-2 py-1 text-sm text-center text-white"
               />
             </div>
@@ -494,18 +534,22 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
           <div className="space-y-4 pt-4 border-t border-gray-800/80">
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">動能漲幅篩選 (Client-Side)</h3>
             <div className="space-y-2">
+              <div className="flex items-center space-x-3">
+                <label className="text-xs text-gray-500 whitespace-nowrap">爆量倍數 (RVOL)</label>
+                <NumericInput value={volMultiplier} onChange={setVolMultiplier} className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-sm text-white" />
+              </div>
               <div>
                 <label className="text-xs text-gray-500">單日最低漲幅 (%)</label>
-                <input type="number" value={min1dReturn} onChange={(e) => setMin1dReturn(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-sm text-white" />
+                <NumericInput value={min1dReturn} onChange={setMin1dReturn} className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-sm text-white" />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-[10px] text-gray-500 block">區間天數 (N)</label>
-                  <input type="number" value={nDaysReturn} onChange={(e) => setNDaysReturn(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                  <NumericInput value={nDaysReturn} onChange={setNDaysReturn} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
                 </div>
                 <div>
                   <label className="text-[10px] text-gray-500 block">N日最低漲幅 (%)</label>
-                  <input type="number" value={minNdReturn} onChange={(e) => setMinNdReturn(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
+                  <NumericInput value={minNdReturn} onChange={setMinNdReturn} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white" />
                 </div>
               </div>
               <div>
@@ -549,20 +593,20 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
               <div className="space-y-3 bg-gray-900/40 p-3 rounded-lg border border-gray-800 text-xs">
                 <div>
                   <label className="text-gray-500 block">曾單日總漲幅大於 (%)</label>
-                  <input type="number" value={extMinDailyRet} onChange={(e) => setExtMinDailyRet(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                  <NumericInput value={extMinDailyRet} onChange={setExtMinDailyRet} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
                 </div>
                 <div>
                   <label className="text-gray-500 block">曾單日實體大於 (%)</label>
-                  <input type="number" value={extMinBodyRet} onChange={(e) => setExtMinBodyRet(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                  <NumericInput value={extMinBodyRet} onChange={setExtMinBodyRet} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-[10px] text-gray-500">時間範圍起 (月)</label>
-                    <input type="number" value={extTimeRangeMin} onChange={(e) => setExtTimeRangeMin(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-white" />
+                    <NumericInput value={extTimeRangeMin} onChange={setExtTimeRangeMin} className="w-full bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-white" />
                   </div>
                   <div>
                     <label className="text-[10px] text-gray-500">時間範圍止 (月)</label>
-                    <input type="number" value={extTimeRangeMax} onChange={(e) => setExtTimeRangeMax(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-white" />
+                    <NumericInput value={extTimeRangeMax} onChange={setExtTimeRangeMax} className="w-full bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-white" />
                   </div>
                 </div>
 
@@ -580,7 +624,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                     <div className="grid grid-cols-2 gap-2 mt-2">
                       <div>
                         <label className="text-[10px] text-gray-500 block">未來天數</label>
-                        <input type="number" value={extAdvNDays} onChange={(e) => setExtAdvNDays(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
+                        <NumericInput value={extAdvNDays} onChange={setExtAdvNDays} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
                       </div>
                       <div>
                         <label className="text-[10px] text-gray-500 block">預期方向</label>
@@ -598,7 +642,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                       </div>
                       <div>
                         <label className="text-[10px] text-gray-500 block">目標值 (%)</label>
-                        <input type="number" value={extAdvRetVal} onChange={(e) => setExtAdvRetVal(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
+                        <NumericInput value={extAdvRetVal} onChange={setExtAdvRetVal} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
                       </div>
                     </div>
                   )}
@@ -609,29 +653,29 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
             {strategySelect === '2.Fake Breakout Short' && (
               <div className="space-y-3 bg-gray-900/40 p-3 rounded-lg border border-gray-800 text-xs">
                 <div>
-                  <label className="text-gray-500 block">跳空大於 (%)</label>
-                  <input type="number" value={fbMinGap} onChange={(e) => setFbMinGap(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                  <label className="text-gray-500 block">跳空Gap大於 (%)</label>
+                  <NumericInput value={fbMinGap} onChange={setFbMinGap} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
                 </div>
                 <div>
                   <label className="text-gray-500 block">上影線比例大於 (%)</label>
-                  <input type="number" value={fbMinShadowRatio} onChange={(e) => setFbMinShadowRatio(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                  <NumericInput value={fbMinShadowRatio} onChange={setFbMinShadowRatio} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
                 </div>
                 <div>
-                  <label className="text-gray-500 block">最低成交量大於 (M)</label>
-                  <input type="number" value={fbMinVolM} onChange={(e) => setFbMinVolM(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                  <label className="text-gray-500 block">當日成交量大於 (M)</label>
+                  <NumericInput value={fbMinVolM} onChange={setFbMinVolM} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
                 </div>
                 <div>
-                  <label className="text-gray-500 block">前日收盤價大於 ($)</label>
-                  <input type="number" value={fbMinPrevClose} onChange={(e) => setFbMinPrevClose(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                  <label className="text-gray-500 block">昨日收盤價大於 ($)</label>
+                  <NumericInput value={fbMinPrevClose} onChange={setFbMinPrevClose} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
                 </div>
                 <div className="grid grid-cols-2 gap-2 mt-2">
                   <div>
-                    <label className="text-[10px] text-gray-500 block">時間範圍起 (月)</label>
-                    <input type="number" value={fbTimeRangeMin} onChange={(e) => setFbTimeRangeMin(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
+                    <label className="text-[10px] text-gray-500 block">時間範圍起(月)</label>
+                    <NumericInput value={fbTimeRangeMin} onChange={setFbTimeRangeMin} className="w-full bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-white" />
                   </div>
                   <div>
-                    <label className="text-[10px] text-gray-500 block">時間範圍止 (月)</label>
-                    <input type="number" value={fbTimeRangeMax} onChange={(e) => setFbTimeRangeMax(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
+                    <label className="text-[10px] text-gray-500 block">時間範圍止(月)</label>
+                    <NumericInput value={fbTimeRangeMax} onChange={setFbTimeRangeMax} className="w-full bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-white" />
                   </div>
                 </div>
               </div>
@@ -643,24 +687,32 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                   <label className="text-gray-500 block">期間天數設定</label>
                   <select value={qmDaysInputType} onChange={(e) => setQmDaysInputType(e.target.value)} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white">
                     <option value="依月份選擇">依月份選擇</option>
-                    <option value="自訂天數">自訂天數</option>
+                    <option value="手動輸入">手動輸入</option>
                   </select>
                 </div>
-                {qmDaysInputType === '依月份選擇' ? (
+                
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <div className={`transition-opacity ${qmDaysInputType !== '手動輸入' ? 'opacity-50 pointer-events-none' : ''}`}>
+                    <label className="text-gray-500 block text-[10px]">自定義天數</label>
+                    <NumericInput
+                      value={qmDaysManual}
+                      onChange={setQmDaysManual}
+                      className={`w-full border border-gray-800 rounded px-2 py-1 text-white ${qmDaysInputType !== '手動輸入' ? 'bg-gray-800/50 cursor-not-allowed' : 'bg-gray-900'}`}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-500 block text-[10px]">近期累計漲幅大於(%)</label>
+                    <NumericInput value={qmMinRet} onChange={setQmMinRet} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" />
+                  </div>
+                </div>
+
+                {qmDaysInputType === '依月份選擇' && (
                   <select value={qmSelMonth} onChange={(e) => setQmSelMonth(e.target.value)} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white">
                     <option value="1個月">1個月 (21日)</option>
                     <option value="3個月">3個月 (63日)</option>
                     <option value="6個月">6個月 (126日)</option>
                   </select>
-                ) : (
-                  <input type="number" value={qmDaysManual} onChange={(e) => setQmDaysManual(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" placeholder="天數" />
                 )}
-                <div>
-                  <label className="text-gray-500 block">
-                    {strategySelect === '3.QullaMaggie Breakout' ? '期間漲幅大於 (%)' : '單日曾經漲幅大於 (%)'}
-                  </label>
-                  <input type="number" value={qmMinRet} onChange={(e) => setQmMinRet(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
-                </div>
 
                 {strategySelect === '4.曾經單日漲幅Breakout' && (
                   <div className="pt-2 border-t border-gray-800/60 mt-3">
@@ -674,9 +726,9 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                       <span>啟用長綠K線篩選</span>
                     </label>
                     {useBodyFilter && (
-                      <div className="mt-2">
-                        <label className="text-gray-500 block">長綠K線實體漲幅大於 (%)</label>
-                        <input type="number" value={minBodyRet} onChange={(e) => setMinBodyRet(Number(e.target.value))} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                      <div>
+                        <label className="text-gray-500 block text-[10px]">實體長度大於(%)</label>
+                        <NumericInput value={minBodyRet} onChange={setMinBodyRet} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
                       </div>
                     )}
                   </div>
