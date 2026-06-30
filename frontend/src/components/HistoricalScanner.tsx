@@ -77,11 +77,11 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   const [volMax, setVolMax] = useState<number>(500);
   const [sector, setSector] = useState<string>('');
   const [industry] = useState<string>('');
-  const [limit, setLimit] = useState<number>(100);
+  const [limit, setLimit] = useState<number>(5000);
 
   // Indicators
   const [smaWindow, setSmaWindow] = useState<number>(50);
-  const [showSmaCols, setShowSmaCols] = useState<boolean>(true);
+  const [showSmaCols, setShowSmaCols] = useState<boolean>(false);
 
   // Return filters
   const [min1dReturn, setMin1dReturn] = useState<number>(50.0);
@@ -126,6 +126,10 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
 
   // UI state
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [showSubSidebar, setShowSubSidebar] = useState<boolean>(() => {
+    const saved = localStorage.getItem('HIST_showSubSidebar');
+    return saved !== null ? saved === 'true' : true;
+  });
   const [scanProgress, setScanProgress] = useState<{ processed: number, total: number } | null>(null);
   const [screenerCount, setScreenerCount] = useState<number | null>(null);
   const [results, setResults] = useState<any[]>([]);
@@ -331,7 +335,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   const isSmaKey = (k: string) => k.startsWith("SMA_") || k === "Price > SMA";
   const isNewsKey = (k: string) => k === "📰 News";
 
-  const historyKeys = results[0] ? Object.keys(results[0]).filter(k => 
+  const historyKeys = results[0] ? Object.keys(results[0]).filter(k =>
     !isBaseKey(k) && !isSmaKey(k) && !isReturnKey(k) && !isVolKey(k) && !isNewsKey(k)
   ) : [];
 
@@ -361,7 +365,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   return (
     <div className="flex flex-1 flex-col overflow-y-auto bg-gray-900 text-gray-100 p-8">
       {/* Header */}
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex justify-between items-end mb-8">
         <div>
           <h2 className="text-2xl font-bold tracking-tight text-white flex items-center space-x-2">
             <span>📈 歷史策略掃描</span>
@@ -371,12 +375,22 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
             設定策略過濾器，從大範圍或特定的股票清單中篩選出潛在的高動能標的。
           </p>
         </div>
+
+        {/* Toggle sub sidebar button */}
+        <button
+          onClick={() => setShowSubSidebar(prev => !prev)}
+          className="pb-1 text-xs font-semibold text-gray-400 hover:text-white transition-all cursor-pointer flex items-center space-x-1.5"
+        >
+          <Sliders size={12} className={showSubSidebar ? 'text-indigo-400' : 'text-gray-500'} />
+          <span>{showSubSidebar ? '隱藏控制欄' : '顯示控制欄'}</span>
+        </button>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
         {/* Left Side: Filters Column */}
-        <div className="xl:col-span-1 bg-gray-950/40 p-6 rounded-2xl border border-gray-800 space-y-6 max-h-[85vh] overflow-y-auto">
-          {/* Main settings */}
+        {showSubSidebar && (
+          <div className="xl:col-span-1 bg-gray-950/40 p-6 rounded-2xl border border-gray-800 space-y-6 max-h-[85vh] overflow-y-auto animate-in slide-in-from-left duration-200">
+            {/* Main settings */}
           <div className="space-y-4">
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center space-x-2">
               <Sliders size={14} className="text-indigo-400" />
@@ -690,7 +704,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                     <option value="手動輸入">手動輸入</option>
                   </select>
                 </div>
-                
+
                 <div className="grid grid-cols-2 gap-3 mt-3">
                   <div className={`transition-opacity ${qmDaysInputType !== '手動輸入' ? 'opacity-50 pointer-events-none' : ''}`}>
                     <label className="text-gray-500 block text-[10px]">自定義天數</label>
@@ -813,9 +827,10 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
             )}
           </button>
         </div>
+        )}
 
         {/* Right Side: Data View Column */}
-        <div className="xl:col-span-3 space-y-6 flex flex-col min-h-[85vh]">
+        <div className={`space-y-6 flex flex-col min-h-[85vh] ${showSubSidebar ? 'xl:col-span-3' : 'xl:col-span-4'}`}>
           {errorMsg && (
             <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-2xl text-sm">
               {errorMsg}
