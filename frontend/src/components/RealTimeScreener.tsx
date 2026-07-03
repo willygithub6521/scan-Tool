@@ -157,6 +157,18 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
     const saved = localStorage.getItem('RTS_maxFloat');
     return saved ? Number(saved) : 500.0;
   });
+  const [minVolume, setMinVolume] = useState<number>(() => {
+    const saved = localStorage.getItem('RTS_minVolume');
+    return saved ? Number(saved) : 0;
+  });
+  const [maxVolume, setMaxVolume] = useState<number>(() => {
+    const saved = localStorage.getItem('RTS_maxVolume');
+    return saved ? Number(saved) : 0;
+  });
+  const [filterVolume, setFilterVolume] = useState<boolean>(() => {
+    const saved = localStorage.getItem('RTS_filterVolume');
+    return saved !== null ? saved === 'true' : false;
+  });
   const [minPrice, setMinPrice] = useState<number>(() => {
     const saved = localStorage.getItem('RTS_minPrice');
     return saved ? Number(saved) : 0.0;
@@ -410,6 +422,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
     const mcVal = row["Market Cap (M)"] ?? 0;
     const floatVal = row["Float (M)"] ?? 0;
     const priceVal = row["Price"] ?? 0;
+    const volumeVal = row["Volume"] ?? 0;
 
     const condGap = filterGap ? (gapVal >= minGap) : true;
     const condGainer = filterGainer ? (gainerVal >= minGainer) : true;
@@ -428,13 +441,19 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
       if (maxFloat > 0) condFloat = condFloat && (floatVal <= maxFloat);
     }
 
+    let condVolume = true;
+    if (filterVolume) {
+      if (minVolume > 0) condVolume = condVolume && (volumeVal >= minVolume * 1_000_000);
+      if (maxVolume > 0) condVolume = condVolume && (volumeVal <= maxVolume * 1_000_000);
+    }
+
     let condPrice = true;
     if (filterPrice) {
       if (minPrice > 0) condPrice = condPrice && (priceVal >= minPrice);
       if (maxPrice > 0) condPrice = condPrice && (priceVal <= maxPrice);
     }
 
-    const isPassed = condGap && condGainer && condIntraday && condInterval && condMc && condFloat && condPrice;
+    const isPassed = condGap && condGainer && condIntraday && condInterval && condMc && condFloat && condVolume && condPrice;
 
     return {
       ...row,
@@ -699,7 +718,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                                   {row[intervalKey]}%
                                 </td>
                                 <td className="py-3.5 px-6 text-right font-medium text-gray-300">
-                                  {row["Volume"] ? row["Volume"].toLocaleString() : 'N/A'}
+                                  {row["Volume"] ? `${(row["Volume"] / 1000000).toFixed(2)}M` : 'N/A'}
                                 </td>
                                 <td className="py-3.5 px-6 text-right text-gray-400">{row["Market Cap (M)"] ? `${row["Market Cap (M)"]}M` : 'N/A'}</td>
                                 <td className="py-3.5 px-6 text-right text-gray-400">{row["Float (M)"] ? `${row["Float (M)"]}M` : 'N/A'}</td>
@@ -793,7 +812,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                                 {info.current_intraday > 0 ? '+' : ''}{info.current_intraday?.toFixed(2)}%
                               </td>
                               <td className="py-3.5 px-4 text-right font-medium text-green-400">+{info.trigger_pct?.toFixed(2)}%</td>
-                              <td className="py-3.5 px-4 text-right text-gray-300">{info.volume ? info.volume.toLocaleString() : 'N/A'}</td>
+                              <td className="py-3.5 px-4 text-right text-gray-300">{info.volume ? `${(info.volume / 1000000).toFixed(2)}M` : 'N/A'}</td>
                               <td className="py-3.5 px-4 text-right font-bold text-white">{info.mc_m > 0 ? `${info.mc_m.toFixed(2)}M` : 'N/A'}</td>
                               <td className="py-3.5 px-4 text-right text-gray-300">{info.float_m > 0 ? `${info.float_m.toFixed(2)}M` : 'N/A'}</td>
                               <td className="py-3.5 px-4 text-center text-gray-400">{triggerTime.toLocaleTimeString()}</td>
@@ -976,6 +995,23 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                       <span className="text-gray-500">M</span>
                       <span className="text-gray-500 pl-2">最高:</span>
                       <NumericInput value={maxFloat} onChange={setMaxFloat} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                      <span className="text-gray-500">M</span>
+                    </div>
+                  </FilterToggleRow>
+
+                  {/* ── Volume Filter ─────────────────────────────────── */}
+                  <FilterToggleRow
+                    title="成交量範圍 (Volume)"
+                    description="設定篩選標的的當日成交量區間（以百萬股 M 為單位）。"
+                    isActive={filterVolume}
+                    onToggle={setFilterVolume}
+                  >
+                    <div className="flex items-center space-x-2 text-xs">
+                      <span className="text-gray-500">最低:</span>
+                      <NumericInput value={minVolume} onChange={setMinVolume} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                      <span className="text-gray-500">M</span>
+                      <span className="text-gray-500 pl-2">最高:</span>
+                      <NumericInput value={maxVolume} onChange={setMaxVolume} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
                       <span className="text-gray-500">M</span>
                     </div>
                   </FilterToggleRow>
