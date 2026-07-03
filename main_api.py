@@ -259,6 +259,7 @@ class RealtimeTickRequest(BaseModel):
     filter_float: bool = True
     strict_filter: bool = False
     watchlist: Dict[str, Any] = {}
+    custom_tickers: List[str] = []
 
 class VectorizedBacktestRequest(BaseModel):
     tickers: List[str]
@@ -739,8 +740,11 @@ def post_screener_tick(req: RealtimeTickRequest):
             return sanitize_value({"results": [], "watchlist": req.watchlist, "new_notifications": []})
 
     watchlist_tickers = list(req.watchlist.keys())
-    # Merge: gainers first, then watchlist-only tickers (preserve order, no duplicates)
-    all_tickers = list(dict.fromkeys(gainers_tickers + watchlist_tickers))
+    # Merge: gainers first, then watchlist, then custom (preserve order, no duplicates)
+    all_tickers = list(dict.fromkeys(gainers_tickers + watchlist_tickers + req.custom_tickers))
+    
+    # Pre-fetch floats for any missing tickers in the pool
+    _ = get_floats_optimized(key, all_tickers)
 
     # 2. Single batch-quote call for all tickers
     quotes = get_realtime_quotes(key, all_tickers)
@@ -826,6 +830,46 @@ def post_screener_tick(req: RealtimeTickRequest):
             "_recent_pct": recent_pct
         })
 
+    # 4.5 Process custom_tickers results
+    custom_results = []
+    for ticker in req.custom_tickers:
+        q = quotes_dict.get(ticker, {})
+        price = q.get("price", 0)
+        open_price = q.get("open", 0)
+        prev_close = q.get("previousClose", 0)
+        changes_pct = q.get("changePercentage", 0)
+        market_cap = q.get("marketCap", 0)
+
+        gap_pct = ((open_price / prev_close - 1) * 100) if prev_close and prev_close > 0 else 0
+        intraday_pct = ((price / open_price - 1) * 100) if open_price and open_price > 0 else 0
+        mc_m = market_cap / 1e6 if market_cap else 0
+
+        float_shares = GLOBAL_FLOATS_CACHE.get(ticker, 0)
+        float_m = float_shares / 1e6 if float_shares else 0
+
+        # Calculate recent N-minute max gain from ring buffer
+        cutoff = ts - window_secs
+        buf = PRICE_BUFFER.get(ticker, deque())
+        prices_in_window = [p for t, p in buf if t >= cutoff and p > 0]
+
+        if prices_in_window and price and price > 0:
+            min_price = min(prices_in_window)
+            recent_pct = ((price / min_price) - 1) * 100
+        else:
+            recent_pct = 0.0
+
+        custom_results.append({
+            "Ticker": ticker,
+            "Price": round(price, 2),
+            "Gap (%)": round(gap_pct, 2),
+            "Gainer (%)": round(changes_pct, 2),
+            "開盤到目前漲幅 (%)": round(intraday_pct, 2),
+            f"最近{req.recent_mins_window}分鐘最大漲幅 (%)": round(recent_pct, 2),
+            "Volume": q.get("volume", 0),
+            "Market Cap (M)": round(mc_m, 2) if mc_m > 0 else None,
+            "Float (M)": round(float_m, 2) if float_m > 0 else None,
+        })
+
     # 5. Unified Watchlist Updates
     now_dt = datetime.datetime.now()
     watchlist = req.watchlist.copy()
@@ -884,6 +928,7 @@ def post_screener_tick(req: RealtimeTickRequest):
 
     return sanitize_value({
         "results": results,
+        "custom_results": custom_results,
         "watchlist": watchlist,
         "new_notifications": new_notifications,
         "gainers_refreshed_at": GAINERS_CACHE["updated_at"].isoformat() if GAINERS_CACHE.get("updated_at") else None,
