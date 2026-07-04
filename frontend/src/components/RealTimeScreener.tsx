@@ -680,7 +680,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                   <span>監控狀態與控制</span>
                 </h3>
 
-                <div className="space-y-3 bg-gray-900/50 p-4 rounded-xl border border-gray-800 text-xs text-left">
+                <div className="space-y-4 text-xs text-left">
                   {activeSubTab === 'custom' ? (
                     <>
                       <div className="flex justify-between">
@@ -701,6 +701,80 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                             <span className="text-amber-400 text-[10px]">無任何篩選條件 (僅顯示)</span>
                           )}
                         </div>
+                      </div>
+
+                      {/* --- ADD Ticker Input Area HERE --- */}
+                      <div className="border-t border-gray-800 mt-4 pt-4 space-y-3">
+                        <span className="text-gray-500 block mb-1">新增監控標的</span>
+                        <div className="flex flex-col space-y-2">
+                          <input
+                            type="text"
+                            id="customTickerInput"
+                            placeholder="輸入代碼 (例: AAPL)"
+                            className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 uppercase w-full"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                const val = e.currentTarget.value.trim().toUpperCase();
+                                if (val && !customTickers.includes(val)) {
+                                  const next = [...customTickers, val];
+                                  setCustomTickers(next);
+                                  localStorage.setItem('RTS_customTickers', JSON.stringify(next));
+                                  e.currentTarget.value = '';
+                                }
+                              }
+                            }}
+                          />
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => {
+                                const input = document.getElementById('customTickerInput') as HTMLInputElement;
+                                const val = input.value.trim().toUpperCase();
+                                if (val && !customTickers.includes(val)) {
+                                  const next = [...customTickers, val];
+                                  setCustomTickers(next);
+                                  localStorage.setItem('RTS_customTickers', JSON.stringify(next));
+                                  input.value = '';
+                                }
+                              }}
+                              className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl px-3 py-2 text-xs font-semibold transition-colors cursor-pointer flex-1 text-center shadow-lg shadow-indigo-600/30"
+                            >
+                              加入監控
+                            </button>
+                            <button
+                              onClick={() => {
+                                setCustomTickers([]);
+                                localStorage.setItem('RTS_customTickers', JSON.stringify([]));
+                              }}
+                              className="bg-red-600/20 hover:bg-red-600/40 border border-red-500/30 text-red-400 rounded-xl px-3 py-2 text-xs font-semibold transition-colors cursor-pointer text-center"
+                            >
+                              全部清除
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Custom Tickers Chips (Flattened) */}
+                        {customTickers.length > 0 && (
+                          <div className="pt-2 max-h-40 overflow-y-auto">
+                            <span className="text-[10px] text-gray-500 block mb-2 font-semibold">已加入名單 ({customTickers.length})</span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {customTickers.map(t => (
+                                <span key={t} className="bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 px-2 py-1 rounded-lg text-[10px] font-semibold flex items-center space-x-1.5">
+                                  <span>{t}</span>
+                                  <button 
+                                    onClick={() => {
+                                      const next = customTickers.filter(x => x !== t);
+                                      setCustomTickers(next);
+                                      localStorage.setItem('RTS_customTickers', JSON.stringify(next));
+                                    }}
+                                    className="hover:text-red-400 transition-colors cursor-pointer"
+                                  >
+                                    &times;
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </>
                   ) : (
@@ -1009,89 +1083,6 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
             </>
           ) : activeSubTab === 'custom' ? (
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <details className="group bg-gray-950/40 border border-gray-800 rounded-3xl shadow-xl overflow-hidden" open>
-                <summary className="flex justify-between items-center p-6 cursor-pointer list-none bg-gray-900/30 hover:bg-gray-800/40 transition-colors">
-                  <div>
-                    <h3 className="text-lg font-bold text-white flex items-center space-x-2">
-                      <span className="text-indigo-400">📋</span>
-                      <span>自訂監控名單 (My Watchlist)</span>
-                    </h3>
-                    <p className="text-gray-400 text-xs mt-1 group-open:opacity-100 opacity-80">輸入股票代碼加入自訂名單，將獨立監控並套用設定分頁中的過濾條件。</p>
-                  </div>
-                  <div className="text-gray-500 group-open:rotate-180 transition-transform duration-300">
-                    ▼
-                  </div>
-                </summary>
-                
-                <div className="p-6 pt-0 border-t border-gray-800/50 space-y-6 text-left mt-6">
-                {/* Ticker Input area */}
-                <div className="flex items-center space-x-3">
-                  <input
-                    type="text"
-                    id="customTickerInput"
-                    placeholder="輸入股票代碼 (例: AAPL)"
-                    className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 uppercase flex-1 max-w-xs"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        const val = e.currentTarget.value.trim().toUpperCase();
-                        if (val && !customTickers.includes(val)) {
-                          const next = [...customTickers, val];
-                          setCustomTickers(next);
-                          localStorage.setItem('RTS_customTickers', JSON.stringify(next));
-                          e.currentTarget.value = '';
-                        }
-                      }
-                    }}
-                  />
-                  <button
-                    onClick={() => {
-                      const input = document.getElementById('customTickerInput') as HTMLInputElement;
-                      const val = input.value.trim().toUpperCase();
-                      if (val && !customTickers.includes(val)) {
-                        const next = [...customTickers, val];
-                        setCustomTickers(next);
-                        localStorage.setItem('RTS_customTickers', JSON.stringify(next));
-                        input.value = '';
-                      }
-                    }}
-                    className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors cursor-pointer shadow-lg shadow-indigo-600/30"
-                  >
-                    加入監控
-                  </button>
-                  <button
-                    onClick={() => {
-                      setCustomTickers([]);
-                      localStorage.setItem('RTS_customTickers', JSON.stringify([]));
-                    }}
-                    className="bg-red-600/20 hover:bg-red-600/40 border border-red-500/30 text-red-400 rounded-xl px-4 py-2 text-sm font-semibold transition-colors cursor-pointer"
-                  >
-                    全部清除
-                  </button>
-                </div>
-                
-                {/* Custom Tickers Chips */}
-                {customTickers.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-2">
-                    {customTickers.map(t => (
-                      <span key={t} className="bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center space-x-2">
-                        <span>{t}</span>
-                        <button 
-                          onClick={() => {
-                            const next = customTickers.filter(x => x !== t);
-                            setCustomTickers(next);
-                            localStorage.setItem('RTS_customTickers', JSON.stringify(next));
-                          }}
-                          className="hover:text-red-400 transition-colors cursor-pointer"
-                        >
-                          &times;
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-                </div>
-              </details>
-
               {/* Custom Watchlist Table */}
               <div className="bg-gray-950/40 border border-gray-800 rounded-3xl overflow-hidden flex flex-col shadow-xl">
                 <div className="flex justify-between items-center p-5 border-b border-gray-800 bg-gray-950/60">
