@@ -742,8 +742,10 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                             </button>
                             <button
                               onClick={() => {
-                                setCustomTickers([]);
-                                localStorage.setItem('RTS_customTickers', JSON.stringify([]));
+                                if (window.confirm("確定要清除所有自訂監控名單嗎？此動作無法復原。")) {
+                                  setCustomTickers([]);
+                                  localStorage.setItem('RTS_customTickers', JSON.stringify([]));
+                                }
                               }}
                               className="bg-red-600/20 hover:bg-red-600/40 border border-red-500/30 text-red-400 rounded-xl px-3 py-2 text-xs font-semibold transition-colors cursor-pointer text-center"
                             >
@@ -836,56 +838,47 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
             </div>
 
             <div className="space-y-3 pt-6 border-t border-gray-800/80">
-              {activeSubTab === 'dashboard' ? (
-                <div className="flex flex-col space-y-2">
-                  {!hasStarted ? (
+              <div className="flex flex-col space-y-2">
+                {!hasStarted ? (
+                  <button
+                    onClick={handleManualClick}
+                    disabled={isLoading}
+                    className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800/40 text-white rounded-xl py-3 px-4 font-semibold text-sm shadow-lg shadow-indigo-600/35 transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
+                  >
+                    {isLoading ? (
+                      <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    ) : (
+                      <>
+                        <RefreshCw size={16} />
+                        <span>開始雷達掃描 (啟動自動更新)</span>
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <div className="flex space-x-2">
                     <button
                       onClick={handleManualClick}
                       disabled={isLoading}
-                      className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800/40 text-white rounded-xl py-3 px-4 font-semibold text-sm shadow-lg shadow-indigo-600/35 transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
+                      className="w-full bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 text-white rounded-xl py-3 px-4 font-semibold text-xs shadow-lg transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
                     >
                       {isLoading ? (
-                        <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
                       ) : (
                         <>
-                          <RefreshCw size={16} />
-                          <span>開始雷達掃描 (啟動自動更新)</span>
+                          <RefreshCw size={14} />
+                          <span>強制更新</span>
                         </>
                       )}
                     </button>
-                  ) : (
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={handleManualClick}
-                        disabled={isLoading}
-                        className="w-full bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 text-white rounded-xl py-3 px-4 font-semibold text-xs shadow-lg transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
-                      >
-                        {isLoading ? (
-                          <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                        ) : (
-                          <>
-                            <RefreshCw size={14} />
-                            <span>強制更新</span>
-                          </>
-                        )}
-                      </button>
-                      <button
-                        onClick={() => setHasStarted(false)}
-                        className="w-full bg-red-600 hover:bg-red-500 text-white rounded-xl py-3 px-4 font-semibold text-xs shadow-lg shadow-red-600/30 transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
-                      >
-                        停止雷達掃描
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <button
-                  onClick={() => setActiveSubTab('dashboard')}
-                  className="w-full bg-gray-800 hover:bg-gray-700 text-white rounded-xl py-3 px-4 font-semibold text-sm transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer border border-gray-700"
-                >
-                  <span>返回監控面板</span>
-                </button>
-              )}
+                    <button
+                      onClick={() => setHasStarted(false)}
+                      className="w-full bg-red-600 hover:bg-red-500 text-white rounded-xl py-3 px-4 font-semibold text-xs shadow-lg shadow-red-600/30 transition-colors duration-150 flex items-center justify-center space-x-2 cursor-pointer"
+                    >
+                      停止雷達掃描
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
