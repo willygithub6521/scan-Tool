@@ -279,10 +279,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
   });
   const [customResults, setCustomResults] = useState<any[]>([]);
 
-  const [syncCustomFilters, setSyncCustomFilters] = useState<boolean>(() => {
-    const saved = localStorage.getItem('RTS_syncCustomFilters');
-    return saved !== null ? saved === 'true' : true;
-  });
+
 
   const customTickersRef = useRef<string[]>([]);
   customTickersRef.current = customTickers;
@@ -526,52 +523,52 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
     const priceVal = row["Price"] ?? 0;
     const volumeVal = row["Volume"] ?? 0;
 
-    const cGap = syncCustomFilters ? minGap : customFilters.minGap;
-    const cFilterGap = syncCustomFilters ? filterGap : customFilters.filterGap;
+    const cGap = customFilters.minGap;
+    const cFilterGap = customFilters.filterGap;
     const condGap = cFilterGap ? (gapVal >= cGap) : true;
 
-    const cGainer = syncCustomFilters ? minGainer : customFilters.minGainer;
-    const cFilterGainer = syncCustomFilters ? filterGainer : customFilters.filterGainer;
+    const cGainer = customFilters.minGainer;
+    const cFilterGainer = customFilters.filterGainer;
     const condGainer = cFilterGainer ? (gainerVal >= cGainer) : true;
 
-    const cIntraday = syncCustomFilters ? minIntraday : customFilters.minIntraday;
-    const cFilterIntraday = syncCustomFilters ? filterIntraday : customFilters.filterIntraday;
+    const cIntraday = customFilters.minIntraday;
+    const cFilterIntraday = customFilters.filterIntraday;
     const condIntraday = cFilterIntraday ? (intradayVal >= cIntraday) : true;
 
-    const cInterval = syncCustomFilters ? minIntervalPct : customFilters.minIntervalPct;
-    const cFilterInterval = syncCustomFilters ? filterInterval : customFilters.filterInterval;
+    const cInterval = customFilters.minIntervalPct;
+    const cFilterInterval = customFilters.filterInterval;
     const condInterval = cFilterInterval ? (intervalVal >= cInterval) : true;
 
-    const cMinMc = syncCustomFilters ? minMktCap : customFilters.minMktCap;
-    const cMaxMc = syncCustomFilters ? maxMktCap : customFilters.maxMktCap;
-    const cFilterMc = syncCustomFilters ? filterMktCap : customFilters.filterMktCap;
+    const cMinMc = customFilters.minMktCap;
+    const cMaxMc = customFilters.maxMktCap;
+    const cFilterMc = customFilters.filterMktCap;
     let condMc = true;
     if (cFilterMc) {
       if (cMinMc > 0) condMc = condMc && (mcVal >= cMinMc);
       if (cMaxMc > 0) condMc = condMc && (mcVal <= cMaxMc);
     }
 
-    const cMinFloat = syncCustomFilters ? minFloat : customFilters.minFloat;
-    const cMaxFloat = syncCustomFilters ? maxFloat : customFilters.maxFloat;
-    const cFilterFloat = syncCustomFilters ? filterFloat : customFilters.filterFloat;
+    const cMinFloat = customFilters.minFloat;
+    const cMaxFloat = customFilters.maxFloat;
+    const cFilterFloat = customFilters.filterFloat;
     let condFloat = true;
     if (cFilterFloat) {
       if (cMinFloat > 0) condFloat = condFloat && (floatVal >= cMinFloat);
       if (cMaxFloat > 0) condFloat = condFloat && (floatVal <= cMaxFloat);
     }
 
-    const cMinVolume = syncCustomFilters ? minVolume : customFilters.minVolume;
-    const cMaxVolume = syncCustomFilters ? maxVolume : customFilters.maxVolume;
-    const cFilterVolume = syncCustomFilters ? filterVolume : customFilters.filterVolume;
+    const cMinVolume = customFilters.minVolume;
+    const cMaxVolume = customFilters.maxVolume;
+    const cFilterVolume = customFilters.filterVolume;
     let condVolume = true;
     if (cFilterVolume) {
       if (cMinVolume > 0) condVolume = condVolume && (volumeVal >= cMinVolume * 1_000_000);
       if (cMaxVolume > 0) condVolume = condVolume && (volumeVal <= cMaxVolume * 1_000_000);
     }
 
-    const cMinPrice = syncCustomFilters ? minPrice : customFilters.minPrice;
-    const cMaxPrice = syncCustomFilters ? maxPrice : customFilters.maxPrice;
-    const cFilterPrice = syncCustomFilters ? filterPrice : customFilters.filterPrice;
+    const cMinPrice = customFilters.minPrice;
+    const cMaxPrice = customFilters.maxPrice;
+    const cFilterPrice = customFilters.filterPrice;
     let condPrice = true;
     if (cFilterPrice) {
       if (cMinPrice > 0) condPrice = condPrice && (priceVal >= cMinPrice);
@@ -589,8 +586,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
   });
 
   const filteredCustomResults = processedCustomResults.filter(row => {
-    const cStrict = syncCustomFilters ? strictFilter : customFilters.strictFilter;
-    if (cStrict) {
+    if (customFilters.strictFilter) {
       return row.isLocalPassed;
     }
     return true;
@@ -685,43 +681,76 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                 </h3>
 
                 <div className="space-y-3 bg-gray-900/50 p-4 rounded-xl border border-gray-800 text-xs text-left">
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">更新頻率</span>
-                    <span className="font-semibold text-white">{autoRefreshMins} 分鐘</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">計算區間</span>
-                    <span className="font-semibold text-white">{recentMinsWindow} 分鐘</span>
-                  </div>
+                  {activeSubTab === 'custom' ? (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">計算區間</span>
+                        <span className="font-semibold text-white">{recentMinsWindow} 分鐘</span>
+                      </div>
+                      <div className="border-t border-gray-800 my-2 pt-2">
+                        <span className="text-gray-500 block mb-1">啟用篩選狀態</span>
+                        <div className="flex flex-wrap gap-1">
+                          {customFilters.filterGap && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">跳空</span>}
+                          {customFilters.filterGainer && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">即時漲</span>}
+                          {customFilters.filterIntraday && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">開盤漲</span>}
+                          {customFilters.filterInterval && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">波動</span>}
+                          {customFilters.filterMktCap && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">市值</span>}
+                          {customFilters.filterFloat && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">流通</span>}
+                          {customFilters.filterPrice && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">股價</span>}
+                          {!customFilters.filterGap && !customFilters.filterGainer && !customFilters.filterIntraday && !customFilters.filterInterval && !customFilters.filterMktCap && !customFilters.filterFloat && !customFilters.filterPrice && (
+                            <span className="text-amber-400 text-[10px]">無任何篩選條件 (僅顯示)</span>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">更新頻率</span>
+                        <span className="font-semibold text-white">{autoRefreshMins} 分鐘</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">計算區間</span>
+                        <span className="font-semibold text-white">{recentMinsWindow} 分鐘</span>
+                      </div>
 
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">觀察池效期</span>
-                    <span className="font-semibold text-white">{watchlistExpiryMins} 分鐘</span>
-                  </div>
-                  <div className="border-t border-gray-800 my-2 pt-2">
-                    <span className="text-gray-500 block mb-1">啟用篩選狀態</span>
-                    <div className="flex flex-wrap gap-1">
-                      {filterGap && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">跳空</span>}
-                      {filterGainer && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">即時漲</span>}
-                      {filterIntraday && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">開盤漲</span>}
-                      {filterInterval && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">波動</span>}
-                      {filterMktCap && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">市值</span>}
-                      {filterFloat && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">流通</span>}
-                      {filterPrice && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">股價</span>}
-                      {!filterGap && !filterGainer && !filterIntraday && !filterInterval && !filterMktCap && !filterFloat && !filterPrice && (
-                        <span className="text-amber-400 text-[10px]">無任何篩選條件 (僅顯示)</span>
-                      )}
-                    </div>
-                  </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">觀察池效期</span>
+                        <span className="font-semibold text-white">{watchlistExpiryMins} 分鐘</span>
+                      </div>
+                      <div className="border-t border-gray-800 my-2 pt-2">
+                        <span className="text-gray-500 block mb-1">啟用篩選狀態</span>
+                        <div className="flex flex-wrap gap-1">
+                          {filterGap && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">跳空</span>}
+                          {filterGainer && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">即時漲</span>}
+                          {filterIntraday && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">開盤漲</span>}
+                          {filterInterval && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">波動</span>}
+                          {filterMktCap && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">市值</span>}
+                          {filterFloat && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">流通</span>}
+                          {filterPrice && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">股價</span>}
+                          {!filterGap && !filterGainer && !filterIntraday && !filterInterval && !filterMktCap && !filterFloat && !filterPrice && (
+                            <span className="text-amber-400 text-[10px]">無任何篩選條件 (僅顯示)</span>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
               {/* Quick Toggles */}
               <div className="space-y-3 pt-4 border-t border-gray-800/80 text-left">
-                <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
-                  <input type="checkbox" checked={strictFilter} onChange={(e) => setStrictFilter(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
-                  <span>僅顯示達標標的 (隱藏未過關)</span>
-                </label>
+                {activeSubTab === 'custom' ? (
+                  <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
+                    <input type="checkbox" checked={customFilters.strictFilter} onChange={(e) => updateCustomFilter('strictFilter', e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
+                    <span>僅顯示達標標的 (隱藏未過關)</span>
+                  </label>
+                ) : (
+                  <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
+                    <input type="checkbox" checked={strictFilter} onChange={(e) => setStrictFilter(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
+                    <span>僅顯示達標標的 (隱藏未過關)</span>
+                  </label>
+                )}
                 <label className="flex items-center space-x-2 text-sm font-medium text-indigo-400 cursor-pointer">
                   <input type="checkbox" checked={enableAlerts} onChange={(e) => setEnableAlerts(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
                   <div className="flex items-center space-x-1.5">
@@ -980,17 +1009,21 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
             </>
           ) : activeSubTab === 'custom' ? (
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <div className="bg-gray-950/40 border border-gray-800 rounded-3xl p-6 shadow-xl space-y-6 text-left">
-                <div className="flex justify-between items-center">
+              <details className="group bg-gray-950/40 border border-gray-800 rounded-3xl shadow-xl overflow-hidden" open>
+                <summary className="flex justify-between items-center p-6 cursor-pointer list-none bg-gray-900/30 hover:bg-gray-800/40 transition-colors">
                   <div>
                     <h3 className="text-lg font-bold text-white flex items-center space-x-2">
                       <span className="text-indigo-400">📋</span>
                       <span>自訂監控名單 (My Watchlist)</span>
                     </h3>
-                    <p className="text-gray-400 text-xs mt-1">輸入股票代碼加入自訂名單，將獨立監控並套用設定分頁中的過濾條件。</p>
+                    <p className="text-gray-400 text-xs mt-1 group-open:opacity-100 opacity-80">輸入股票代碼加入自訂名單，將獨立監控並套用設定分頁中的過濾條件。</p>
                   </div>
-                </div>
+                  <div className="text-gray-500 group-open:rotate-180 transition-transform duration-300">
+                    ▼
+                  </div>
+                </summary>
                 
+                <div className="p-6 pt-0 border-t border-gray-800/50 space-y-6 text-left mt-6">
                 {/* Ticker Input area */}
                 <div className="flex items-center space-x-3">
                   <input
@@ -1056,7 +1089,8 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                     ))}
                   </div>
                 )}
-              </div>
+                </div>
+              </details>
 
               {/* Custom Watchlist Table */}
               <div className="bg-gray-950/40 border border-gray-800 rounded-3xl overflow-hidden flex flex-col shadow-xl">
@@ -1350,29 +1384,8 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                 </summary>
 
                 <div className="p-6 pt-0 border-t border-gray-800/50 space-y-6 text-left mt-6">
-                  {/* Sync Toggle */}
-                  <div className="flex items-center justify-between bg-gray-900/50 p-4 rounded-xl border border-gray-800">
-                    <div>
-                      <h4 className="text-sm font-bold text-white">套用與 Top Gainers 相同的篩選條件</h4>
-                      <p className="text-xs text-gray-400 mt-1">開啟後，My Watchlist 將會完全同步並使用上方的 Top Gainers 閥值篩選設定。</p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        className="sr-only peer" 
-                        checked={syncCustomFilters} 
-                        onChange={(e) => {
-                          setSyncCustomFilters(e.target.checked);
-                          localStorage.setItem('RTS_syncCustomFilters', String(e.target.checked));
-                        }} 
-                      />
-                      <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
-                    </label>
-                  </div>
-
                   {/* Independent Custom Filters */}
-                  {!syncCustomFilters && (
-                    <div className="divide-y divide-gray-800/60 space-y-6 pt-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                  <div className="divide-y divide-gray-800/60 space-y-6 pt-4">
                       <FilterToggleRow
                         title="開盤跳空幅度 (Gap %)"
                         description="過濾今日開盤相對於昨日收盤的跳空上漲幅度。"
@@ -1489,7 +1502,6 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                         </div>
                       </FilterToggleRow>
                     </div>
-                  )}
                 </div>
               </details>
             </div>
