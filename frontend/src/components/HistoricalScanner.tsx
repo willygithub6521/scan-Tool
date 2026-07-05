@@ -195,6 +195,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
 
     // Get final tickers list
     let finalTickers: string[] = [];
+    let prefetchedInfo: Record<string, any> = {};
     if (inputMethod === '手動輸入') {
       finalTickers = tickersInput
         .replace(/\n/g, ',')
@@ -223,6 +224,15 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
         };
         const res = await axios.post(`${BASE_URL}/api/fmp-screener`, screenerPayload);
         const fetchedTickers = res.data.results.map((r: any) => r.symbol);
+        res.data.results.forEach((r: any) => {
+          if (r.symbol) {
+            prefetchedInfo[r.symbol] = {
+              shortName: r.companyName || r.symbol,
+              sector: r.sector || "N/A",
+              marketCap: r.marketCap || "N/A"
+            };
+          }
+        });
         finalTickers = fetchedTickers;
         setScreenerCount(fetchedTickers.length);
       } catch (err: any) {
@@ -281,7 +291,8 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
       },
       strict_history_filter: strictHistoryFilter,
       vol_multiplier: volMultiplier,
-      strict_vol_filter: strictVolFilter
+      strict_vol_filter: strictVolFilter,
+      prefetched_info: prefetchedInfo
     };
 
     try {
@@ -292,7 +303,20 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
 
       for (let i = 0; i < finalTickers.length; i += chunkSize) {
         const chunk = finalTickers.slice(i, i + chunkSize);
-        const currentPayload = { ...payloadTemplate, tickers: chunk };
+        
+        // Filter prefetchedInfo to only include the current chunk to save payload size
+        const chunkPrefetchedInfo: Record<string, any> = {};
+        chunk.forEach(t => {
+          if (prefetchedInfo[t]) {
+            chunkPrefetchedInfo[t] = prefetchedInfo[t];
+          }
+        });
+
+        const currentPayload = { 
+          ...payloadTemplate, 
+          tickers: chunk,
+          prefetched_info: Object.keys(chunkPrefetchedInfo).length > 0 ? chunkPrefetchedInfo : null
+        };
 
         const response = await axios.post(`${BASE_URL}/api/scan`, currentPayload);
         allResults = [...allResults, ...response.data.results];

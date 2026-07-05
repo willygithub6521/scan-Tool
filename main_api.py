@@ -203,6 +203,7 @@ class ScanRequest(BaseModel):
     strict_history_filter: bool = False
     vol_multiplier: float = 10.0
     strict_vol_filter: bool = False
+    prefetched_info: Optional[Dict[str, Dict[str, Any]]] = None
 
 class RealtimeScreenerRequest(BaseModel):
     """[DEPRECATED] Legacy model for /api/screener/realtime. Use RealtimeTickRequest instead."""
@@ -446,6 +447,11 @@ def post_scan(req: ScanRequest):
             get_floats_optimized(key, tickers)
         except Exception as e:
             print(f"Error fetching floats in post_scan: {e}")
+
+    # Merge prefetched info if provided
+    if req.prefetched_info:
+        for t, info in req.prefetched_info.items():
+            ticker_info_cache[t] = info
 
     # Step 2: Parallel fetch and process K-lines
     temp_results = []

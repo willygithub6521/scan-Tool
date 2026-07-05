@@ -11,7 +11,7 @@ module.exports = {
     },
     {
       name: "scan-tool-frontend",
-      script: "node_modules/vite/bin/vite.js",
+      script: "node_modules\\vite\\bin\\vite.js",	
       cwd: "c:\\workspace\\scan-Tool\\frontend",
       watch: false
     }
