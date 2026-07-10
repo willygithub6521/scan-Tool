@@ -159,11 +159,11 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
   });
   const [minVolume, setMinVolume] = useState<number>(() => {
     const saved = localStorage.getItem('RTS_minVolume');
-    return saved ? Number(saved) : 0;
+    return saved ? Number(saved) : 1.0;
   });
   const [maxVolume, setMaxVolume] = useState<number>(() => {
     const saved = localStorage.getItem('RTS_maxVolume');
-    return saved ? Number(saved) : 0;
+    return saved ? Number(saved) : 500.0;
   });
   const [filterVolume, setFilterVolume] = useState<boolean>(() => {
     const saved = localStorage.getItem('RTS_filterVolume');
@@ -255,7 +255,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
     minIntervalPct: 0.0, filterInterval: true,
     minMktCap: 0.0, maxMktCap: 5000.0, filterMktCap: true,
     minFloat: 0.0, maxFloat: 500.0, filterFloat: true,
-    minVolume: 0, maxVolume: 0, filterVolume: false,
+    minVolume: 1.0, maxVolume: 500.0, filterVolume: false,
     minPrice: 0.0, maxPrice: 1000.0, filterPrice: true,
     strictFilter: true,
   };
@@ -337,6 +337,8 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
       max_mc_m: maxMktCap,
       min_float_m: minFloat,
       max_float_m: maxFloat,
+      min_volume_m: minVolume,
+      max_volume_m: maxVolume,
       min_price: minPrice,
       max_price: maxPrice,
       filter_price: filterPrice,
@@ -346,6 +348,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
       filter_interval: filterInterval,
       filter_mc: filterMktCap,
       filter_float: filterFloat,
+      filter_volume: filterVolume,
       strict_filter: false,
       watchlist: watchlistRef.current,
       custom_tickers: customTickersRef.current
@@ -388,6 +391,8 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
     localStorage.setItem('RTS_maxMktCap', maxMktCap.toString());
     localStorage.setItem('RTS_minFloat', minFloat.toString());
     localStorage.setItem('RTS_maxFloat', maxFloat.toString());
+    localStorage.setItem('RTS_minVolume', minVolume.toString());
+    localStorage.setItem('RTS_maxVolume', maxVolume.toString());
     localStorage.setItem('RTS_minPrice', minPrice.toString());
     localStorage.setItem('RTS_maxPrice', maxPrice.toString());
     localStorage.setItem('RTS_strictFilter', strictFilter.toString());
@@ -399,10 +404,11 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
     localStorage.setItem('RTS_filterInterval', filterInterval.toString());
     localStorage.setItem('RTS_filterMktCap', filterMktCap.toString());
     localStorage.setItem('RTS_filterFloat', filterFloat.toString());
+    localStorage.setItem('RTS_filterVolume', filterVolume.toString());
     localStorage.setItem('RTS_filterPrice', filterPrice.toString());
   }, [
-    minGap, minGainer, minIntraday, minIntervalPct, minMktCap, maxMktCap, minFloat, maxFloat, minPrice, maxPrice, strictFilter, enableAlerts,
-    filterGap, filterGainer, filterIntraday, filterInterval, filterMktCap, filterFloat, filterPrice
+    minGap, minGainer, minIntraday, minIntervalPct, minMktCap, maxMktCap, minFloat, maxFloat, minVolume, maxVolume, minPrice, maxPrice, strictFilter, enableAlerts,
+    filterGap, filterGainer, filterIntraday, filterInterval, filterMktCap, filterFloat, filterVolume, filterPrice
   ]);
 
   // Trigger permission request on enable
@@ -696,8 +702,9 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                           {customFilters.filterInterval && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">波動</span>}
                           {customFilters.filterMktCap && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">市值</span>}
                           {customFilters.filterFloat && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">流通</span>}
+                          {customFilters.filterVolume && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">成交量</span>}
                           {customFilters.filterPrice && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">股價</span>}
-                          {!customFilters.filterGap && !customFilters.filterGainer && !customFilters.filterIntraday && !customFilters.filterInterval && !customFilters.filterMktCap && !customFilters.filterFloat && !customFilters.filterPrice && (
+                          {!customFilters.filterGap && !customFilters.filterGainer && !customFilters.filterIntraday && !customFilters.filterInterval && !customFilters.filterMktCap && !customFilters.filterFloat && !customFilters.filterVolume && !customFilters.filterPrice && (
                             <span className="text-amber-400 text-[10px]">無任何篩選條件 (僅顯示)</span>
                           )}
                         </div>
@@ -762,7 +769,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                               {customTickers.map(t => (
                                 <span key={t} className="bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 px-2 py-1 rounded-lg text-[10px] font-semibold flex items-center space-x-1.5">
                                   <span>{t}</span>
-                                  <button 
+                                  <button
                                     onClick={() => {
                                       const next = customTickers.filter(x => x !== t);
                                       setCustomTickers(next);
@@ -803,8 +810,9 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                           {filterInterval && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">波動</span>}
                           {filterMktCap && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">市值</span>}
                           {filterFloat && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">流通</span>}
+                          {filterVolume && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">成交量</span>}
                           {filterPrice && <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-1.5 py-0.5 rounded font-mono">股價</span>}
-                          {!filterGap && !filterGainer && !filterIntraday && !filterInterval && !filterMktCap && !filterFloat && !filterPrice && (
+                          {!filterGap && !filterGainer && !filterIntraday && !filterInterval && !filterMktCap && !filterFloat && !filterVolume && !filterPrice && (
                             <span className="text-amber-400 text-[10px]">無任何篩選條件 (僅顯示)</span>
                           )}
                         </div>
@@ -1155,7 +1163,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
             </div>
           ) : (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-              
+
               {/* Section 1: Top Gainers Settings */}
               <details className="group bg-gray-950/40 border border-gray-800 rounded-3xl shadow-xl overflow-hidden" open>
                 <summary className="flex justify-between items-center p-6 cursor-pointer list-none bg-gray-900/30 hover:bg-gray-800/40 transition-colors">
@@ -1170,9 +1178,9 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                     ▼
                   </div>
                 </summary>
-                
+
                 <div className="p-6 pt-0 border-t border-gray-800/50 space-y-8 text-left mt-6">
-                  
+
                   {/* Basic Config */}
                   <div>
                     <h4 className="text-sm font-bold text-gray-300 mb-4 flex items-center space-x-2">
@@ -1220,134 +1228,134 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                       <span>⚡ 閥值篩選條件設定</span>
                     </h4>
 
-                <div className="divide-y divide-gray-800/60 space-y-6">
+                    <div className="divide-y divide-gray-800/60 space-y-6">
 
-                  {/* ── Gap Filter ──────────────────────────────────── */}
-                  <FilterToggleRow
-                    title="開盤跳空幅 (Gap %)"
-                    description="相較於前一日收盤價的開盤跳空漲幅百分比。"
-                    isActive={filterGap}
-                    onToggle={setFilterGap}
-                    isFirst
-                  >
-                    <div className="flex items-center space-x-2">
-                      <span className="text-xs text-gray-500">閥值:</span>
-                      <NumericInput step={0.1} value={minGap} onChange={setMinGap} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
-                      <span className="text-xs text-gray-500">%</span>
+                      {/* ── Gap Filter ──────────────────────────────────── */}
+                      <FilterToggleRow
+                        title="開盤跳空幅 (Gap %)"
+                        description="相較於前一日收盤價的開盤跳空漲幅百分比。"
+                        isActive={filterGap}
+                        onToggle={setFilterGap}
+                        isFirst
+                      >
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs text-gray-500">閥值:</span>
+                          <NumericInput step={0.1} value={minGap} onChange={setMinGap} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                          <span className="text-xs text-gray-500">%</span>
+                        </div>
+                      </FilterToggleRow>
+
+                      {/* ── Gainer Filter ────────────────────────────────── */}
+                      <FilterToggleRow
+                        title="即時累計漲幅 (Gainer %)"
+                        description="相較於前一日收盤價的當前即時最大累計漲幅。"
+                        isActive={filterGainer}
+                        onToggle={setFilterGainer}
+                      >
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs text-gray-500">閥值:</span>
+                          <NumericInput step={0.1} value={minGainer} onChange={setMinGainer} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                          <span className="text-xs text-gray-500">%</span>
+                        </div>
+                      </FilterToggleRow>
+
+                      {/* ── Intraday Filter ──────────────────────────────── */}
+                      <FilterToggleRow
+                        title="開盤到當前漲幅 (%)"
+                        description="從今日開盤價到當前價格的漲幅波動。"
+                        isActive={filterIntraday}
+                        onToggle={setFilterIntraday}
+                      >
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs text-gray-500">閥值:</span>
+                          <NumericInput step={0.1} value={minIntraday} onChange={setMinIntraday} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                          <span className="text-xs text-gray-500">%</span>
+                        </div>
+                      </FilterToggleRow>
+
+                      {/* ── Interval Filter ──────────────────────────────── */}
+                      <FilterToggleRow
+                        title={`最近 ${recentMinsWindow} 分鐘最大波動漲幅 (%)`}
+                        description={`在設定的最近 ${recentMinsWindow} 分鐘內的最高波動上漲幅度。`}
+                        isActive={filterInterval}
+                        onToggle={setFilterInterval}
+                      >
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs text-gray-500">閥值:</span>
+                          <NumericInput step={0.1} value={minIntervalPct} onChange={setMinIntervalPct} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                          <span className="text-xs text-gray-500">%</span>
+                        </div>
+                      </FilterToggleRow>
+
+                      {/* ── Market Cap Filter ────────────────────────────── */}
+                      <FilterToggleRow
+                        title="市值範圍 (Market Cap, M)"
+                        description="設定篩選公司的市值區間（以百萬美元 M 為單位）。"
+                        isActive={filterMktCap}
+                        onToggle={setFilterMktCap}
+                      >
+                        <div className="flex items-center space-x-2 text-xs">
+                          <span className="text-gray-500">最低:</span>
+                          <NumericInput value={minMktCap} onChange={setMinMktCap} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                          <span className="text-gray-500">M</span>
+                          <span className="text-gray-500 pl-2">最高:</span>
+                          <NumericInput value={maxMktCap} onChange={setMaxMktCap} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                          <span className="text-gray-500">M</span>
+                        </div>
+                      </FilterToggleRow>
+
+                      {/* ── Float Filter ─────────────────────────────────── */}
+                      <FilterToggleRow
+                        title="流通股數範圍 (Float, M)"
+                        description="設定篩選公司的流通股數量區間（以百萬股 M 為單位）。"
+                        isActive={filterFloat}
+                        onToggle={setFilterFloat}
+                      >
+                        <div className="flex items-center space-x-2 text-xs">
+                          <span className="text-gray-500">最低:</span>
+                          <NumericInput value={minFloat} onChange={setMinFloat} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                          <span className="text-gray-500">M</span>
+                          <span className="text-gray-500 pl-2">最高:</span>
+                          <NumericInput value={maxFloat} onChange={setMaxFloat} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                          <span className="text-gray-500">M</span>
+                        </div>
+                      </FilterToggleRow>
+
+                      {/* ── Volume Filter ─────────────────────────────────── */}
+                      <FilterToggleRow
+                        title="成交量範圍 (Volume)"
+                        description="設定篩選標的的當日成交量區間（以百萬股 M 為單位）。"
+                        isActive={filterVolume}
+                        onToggle={setFilterVolume}
+                      >
+                        <div className="flex items-center space-x-2 text-xs">
+                          <span className="text-gray-500">最低:</span>
+                          <NumericInput value={minVolume} onChange={setMinVolume} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                          <span className="text-gray-500">M</span>
+                          <span className="text-gray-500 pl-2">最高:</span>
+                          <NumericInput value={maxVolume} onChange={setMaxVolume} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                          <span className="text-gray-500">M</span>
+                        </div>
+                      </FilterToggleRow>
+
+                      {/* ── Price Filter ─────────────────────────────────── */}
+                      <FilterToggleRow
+                        title="股票價格範圍 ($)"
+                        description="過濾標的的股價上下限區間。"
+                        isActive={filterPrice}
+                        onToggle={setFilterPrice}
+                      >
+                        <div className="flex items-center space-x-2 text-xs">
+                          <span className="text-gray-500">最低:</span>
+                          <NumericInput step={0.01} value={minPrice} onChange={setMinPrice} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                          <span className="text-gray-500">$</span>
+                          <span className="text-gray-500 pl-2">最高:</span>
+                          <NumericInput step={0.01} value={maxPrice} onChange={setMaxPrice} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                          <span className="text-gray-500">$</span>
+                        </div>
+                      </FilterToggleRow>
+
                     </div>
-                  </FilterToggleRow>
-
-                  {/* ── Gainer Filter ────────────────────────────────── */}
-                  <FilterToggleRow
-                    title="即時累計漲幅 (Gainer %)"
-                    description="相較於前一日收盤價的當前即時最大累計漲幅。"
-                    isActive={filterGainer}
-                    onToggle={setFilterGainer}
-                  >
-                    <div className="flex items-center space-x-2">
-                      <span className="text-xs text-gray-500">閥值:</span>
-                      <NumericInput step={0.1} value={minGainer} onChange={setMinGainer} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
-                      <span className="text-xs text-gray-500">%</span>
-                    </div>
-                  </FilterToggleRow>
-
-                  {/* ── Intraday Filter ──────────────────────────────── */}
-                  <FilterToggleRow
-                    title="開盤到當前漲幅 (%)"
-                    description="從今日開盤價到當前價格的漲幅波動。"
-                    isActive={filterIntraday}
-                    onToggle={setFilterIntraday}
-                  >
-                    <div className="flex items-center space-x-2">
-                      <span className="text-xs text-gray-500">閥值:</span>
-                      <NumericInput step={0.1} value={minIntraday} onChange={setMinIntraday} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
-                      <span className="text-xs text-gray-500">%</span>
-                    </div>
-                  </FilterToggleRow>
-
-                  {/* ── Interval Filter ──────────────────────────────── */}
-                  <FilterToggleRow
-                    title={`最近 ${recentMinsWindow} 分鐘最大波動漲幅 (%)`}
-                    description={`在設定的最近 ${recentMinsWindow} 分鐘內的最高波動上漲幅度。`}
-                    isActive={filterInterval}
-                    onToggle={setFilterInterval}
-                  >
-                    <div className="flex items-center space-x-2">
-                      <span className="text-xs text-gray-500">閥值:</span>
-                      <NumericInput step={0.1} value={minIntervalPct} onChange={setMinIntervalPct} className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
-                      <span className="text-xs text-gray-500">%</span>
-                    </div>
-                  </FilterToggleRow>
-
-                  {/* ── Market Cap Filter ────────────────────────────── */}
-                  <FilterToggleRow
-                    title="市值範圍 (Market Cap, M)"
-                    description="設定篩選公司的市值區間（以百萬美元 M 為單位）。"
-                    isActive={filterMktCap}
-                    onToggle={setFilterMktCap}
-                  >
-                    <div className="flex items-center space-x-2 text-xs">
-                      <span className="text-gray-500">最低:</span>
-                      <NumericInput value={minMktCap} onChange={setMinMktCap} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
-                      <span className="text-gray-500">M</span>
-                      <span className="text-gray-500 pl-2">最高:</span>
-                      <NumericInput value={maxMktCap} onChange={setMaxMktCap} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
-                      <span className="text-gray-500">M</span>
-                    </div>
-                  </FilterToggleRow>
-
-                  {/* ── Float Filter ─────────────────────────────────── */}
-                  <FilterToggleRow
-                    title="流通股數範圍 (Float, M)"
-                    description="設定篩選公司的流通股數量區間（以百萬股 M 為單位）。"
-                    isActive={filterFloat}
-                    onToggle={setFilterFloat}
-                  >
-                    <div className="flex items-center space-x-2 text-xs">
-                      <span className="text-gray-500">最低:</span>
-                      <NumericInput value={minFloat} onChange={setMinFloat} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
-                      <span className="text-gray-500">M</span>
-                      <span className="text-gray-500 pl-2">最高:</span>
-                      <NumericInput value={maxFloat} onChange={setMaxFloat} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
-                      <span className="text-gray-500">M</span>
-                    </div>
-                  </FilterToggleRow>
-
-                  {/* ── Volume Filter ─────────────────────────────────── */}
-                  <FilterToggleRow
-                    title="成交量範圍 (Volume)"
-                    description="設定篩選標的的當日成交量區間（以百萬股 M 為單位）。"
-                    isActive={filterVolume}
-                    onToggle={setFilterVolume}
-                  >
-                    <div className="flex items-center space-x-2 text-xs">
-                      <span className="text-gray-500">最低:</span>
-                      <NumericInput value={minVolume} onChange={setMinVolume} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
-                      <span className="text-gray-500">M</span>
-                      <span className="text-gray-500 pl-2">最高:</span>
-                      <NumericInput value={maxVolume} onChange={setMaxVolume} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
-                      <span className="text-gray-500">M</span>
-                    </div>
-                  </FilterToggleRow>
-
-                  {/* ── Price Filter ─────────────────────────────────── */}
-                  <FilterToggleRow
-                    title="股票價格範圍 ($)"
-                    description="過濾標的的股價上下限區間。"
-                    isActive={filterPrice}
-                    onToggle={setFilterPrice}
-                  >
-                    <div className="flex items-center space-x-2 text-xs">
-                      <span className="text-gray-500">最低:</span>
-                      <NumericInput step={0.01} value={minPrice} onChange={setMinPrice} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
-                      <span className="text-gray-500">$</span>
-                      <span className="text-gray-500 pl-2">最高:</span>
-                      <NumericInput step={0.01} value={maxPrice} onChange={setMaxPrice} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
-                      <span className="text-gray-500">$</span>
-                    </div>
-                  </FilterToggleRow>
-
-                </div>
                   </div>
                 </div>
               </details>
@@ -1370,122 +1378,122 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                 <div className="p-6 pt-0 border-t border-gray-800/50 space-y-6 text-left mt-6">
                   {/* Independent Custom Filters */}
                   <div className="divide-y divide-gray-800/60 space-y-6 pt-4">
-                      <FilterToggleRow
-                        title="開盤跳空幅度 (Gap %)"
-                        description="過濾今日開盤相對於昨日收盤的跳空上漲幅度。"
-                        isActive={customFilters.filterGap}
-                        onToggle={(v) => updateCustomFilter('filterGap', v)}
-                      >
-                        <div className="flex items-center space-x-2 text-xs">
-                          <span className="text-gray-500">最低:</span>
-                          <NumericInput value={customFilters.minGap} onChange={(v) => updateCustomFilter('minGap', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
-                          <span className="text-gray-500">%</span>
-                        </div>
-                      </FilterToggleRow>
+                    <FilterToggleRow
+                      title="開盤跳空幅度 (Gap %)"
+                      description="過濾今日開盤相對於昨日收盤的跳空上漲幅度。"
+                      isActive={customFilters.filterGap}
+                      onToggle={(v) => updateCustomFilter('filterGap', v)}
+                    >
+                      <div className="flex items-center space-x-2 text-xs">
+                        <span className="text-gray-500">最低:</span>
+                        <NumericInput value={customFilters.minGap} onChange={(v) => updateCustomFilter('minGap', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                        <span className="text-gray-500">%</span>
+                      </div>
+                    </FilterToggleRow>
 
-                      <FilterToggleRow
-                        title="今日漲幅 (Gainer %)"
-                        description="過濾相對於昨日收盤價的今日總漲幅。"
-                        isActive={customFilters.filterGainer}
-                        onToggle={(v) => updateCustomFilter('filterGainer', v)}
-                      >
-                        <div className="flex items-center space-x-2 text-xs">
-                          <span className="text-gray-500">最低:</span>
-                          <NumericInput value={customFilters.minGainer} onChange={(v) => updateCustomFilter('minGainer', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
-                          <span className="text-gray-500">%</span>
-                        </div>
-                      </FilterToggleRow>
+                    <FilterToggleRow
+                      title="今日漲幅 (Gainer %)"
+                      description="過濾相對於昨日收盤價的今日總漲幅。"
+                      isActive={customFilters.filterGainer}
+                      onToggle={(v) => updateCustomFilter('filterGainer', v)}
+                    >
+                      <div className="flex items-center space-x-2 text-xs">
+                        <span className="text-gray-500">最低:</span>
+                        <NumericInput value={customFilters.minGainer} onChange={(v) => updateCustomFilter('minGainer', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                        <span className="text-gray-500">%</span>
+                      </div>
+                    </FilterToggleRow>
 
-                      <FilterToggleRow
-                        title="開盤到目前漲幅 (Intraday %)"
-                        description="過濾標的自今日開盤價算起，到目前為止的盤中漲幅。"
-                        isActive={customFilters.filterIntraday}
-                        onToggle={(v) => updateCustomFilter('filterIntraday', v)}
-                      >
-                        <div className="flex items-center space-x-2 text-xs">
-                          <span className="text-gray-500">最低:</span>
-                          <NumericInput value={customFilters.minIntraday} onChange={(v) => updateCustomFilter('minIntraday', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
-                          <span className="text-gray-500">%</span>
-                        </div>
-                      </FilterToggleRow>
+                    <FilterToggleRow
+                      title="開盤到目前漲幅 (Intraday %)"
+                      description="過濾標的自今日開盤價算起，到目前為止的盤中漲幅。"
+                      isActive={customFilters.filterIntraday}
+                      onToggle={(v) => updateCustomFilter('filterIntraday', v)}
+                    >
+                      <div className="flex items-center space-x-2 text-xs">
+                        <span className="text-gray-500">最低:</span>
+                        <NumericInput value={customFilters.minIntraday} onChange={(v) => updateCustomFilter('minIntraday', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                        <span className="text-gray-500">%</span>
+                      </div>
+                    </FilterToggleRow>
 
-                      <FilterToggleRow
-                        title={`最近 ${recentMinsWindow} 分鐘最大漲幅 (%)`}
-                        description="衡量近期動能，從拉回低點發動的最強漲勢幅度。"
-                        isActive={customFilters.filterInterval}
-                        onToggle={(v) => updateCustomFilter('filterInterval', v)}
-                      >
-                        <div className="flex items-center space-x-2 text-xs">
-                          <span className="text-gray-500">最低:</span>
-                          <NumericInput value={customFilters.minIntervalPct} onChange={(v) => updateCustomFilter('minIntervalPct', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
-                          <span className="text-gray-500">%</span>
-                        </div>
-                      </FilterToggleRow>
+                    <FilterToggleRow
+                      title={`最近 ${recentMinsWindow} 分鐘最大漲幅 (%)`}
+                      description="衡量近期動能，從拉回低點發動的最強漲勢幅度。"
+                      isActive={customFilters.filterInterval}
+                      onToggle={(v) => updateCustomFilter('filterInterval', v)}
+                    >
+                      <div className="flex items-center space-x-2 text-xs">
+                        <span className="text-gray-500">最低:</span>
+                        <NumericInput value={customFilters.minIntervalPct} onChange={(v) => updateCustomFilter('minIntervalPct', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                        <span className="text-gray-500">%</span>
+                      </div>
+                    </FilterToggleRow>
 
-                      <FilterToggleRow
-                        title="市值範圍 (Market Cap, M)"
-                        description="設定篩選公司的總市值區間（以百萬美元 M 為單位）。"
-                        isActive={customFilters.filterMktCap}
-                        onToggle={(v) => updateCustomFilter('filterMktCap', v)}
-                      >
-                        <div className="flex items-center space-x-2 text-xs">
-                          <span className="text-gray-500">最低:</span>
-                          <NumericInput value={customFilters.minMktCap} onChange={(v) => updateCustomFilter('minMktCap', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
-                          <span className="text-gray-500">M</span>
-                          <span className="text-gray-500 pl-2">最高:</span>
-                          <NumericInput value={customFilters.maxMktCap} onChange={(v) => updateCustomFilter('maxMktCap', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
-                          <span className="text-gray-500">M</span>
-                        </div>
-                      </FilterToggleRow>
+                    <FilterToggleRow
+                      title="市值範圍 (Market Cap, M)"
+                      description="設定篩選公司的總市值區間（以百萬美元 M 為單位）。"
+                      isActive={customFilters.filterMktCap}
+                      onToggle={(v) => updateCustomFilter('filterMktCap', v)}
+                    >
+                      <div className="flex items-center space-x-2 text-xs">
+                        <span className="text-gray-500">最低:</span>
+                        <NumericInput value={customFilters.minMktCap} onChange={(v) => updateCustomFilter('minMktCap', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                        <span className="text-gray-500">M</span>
+                        <span className="text-gray-500 pl-2">最高:</span>
+                        <NumericInput value={customFilters.maxMktCap} onChange={(v) => updateCustomFilter('maxMktCap', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                        <span className="text-gray-500">M</span>
+                      </div>
+                    </FilterToggleRow>
 
-                      <FilterToggleRow
-                        title="流通股數範圍 (Float, M)"
-                        description="設定篩選公司的流通股數量區間（以百萬股 M 為單位）。"
-                        isActive={customFilters.filterFloat}
-                        onToggle={(v) => updateCustomFilter('filterFloat', v)}
-                      >
-                        <div className="flex items-center space-x-2 text-xs">
-                          <span className="text-gray-500">最低:</span>
-                          <NumericInput value={customFilters.minFloat} onChange={(v) => updateCustomFilter('minFloat', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
-                          <span className="text-gray-500">M</span>
-                          <span className="text-gray-500 pl-2">最高:</span>
-                          <NumericInput value={customFilters.maxFloat} onChange={(v) => updateCustomFilter('maxFloat', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
-                          <span className="text-gray-500">M</span>
-                        </div>
-                      </FilterToggleRow>
+                    <FilterToggleRow
+                      title="流通股數範圍 (Float, M)"
+                      description="設定篩選公司的流通股數量區間（以百萬股 M 為單位）。"
+                      isActive={customFilters.filterFloat}
+                      onToggle={(v) => updateCustomFilter('filterFloat', v)}
+                    >
+                      <div className="flex items-center space-x-2 text-xs">
+                        <span className="text-gray-500">最低:</span>
+                        <NumericInput value={customFilters.minFloat} onChange={(v) => updateCustomFilter('minFloat', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                        <span className="text-gray-500">M</span>
+                        <span className="text-gray-500 pl-2">最高:</span>
+                        <NumericInput value={customFilters.maxFloat} onChange={(v) => updateCustomFilter('maxFloat', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                        <span className="text-gray-500">M</span>
+                      </div>
+                    </FilterToggleRow>
 
-                      <FilterToggleRow
-                        title="成交量範圍 (Volume)"
-                        description="設定篩選標的的當日成交量區間（以百萬股 M 為單位）。"
-                        isActive={customFilters.filterVolume}
-                        onToggle={(v) => updateCustomFilter('filterVolume', v)}
-                      >
-                        <div className="flex items-center space-x-2 text-xs">
-                          <span className="text-gray-500">最低:</span>
-                          <NumericInput value={customFilters.minVolume} onChange={(v) => updateCustomFilter('minVolume', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
-                          <span className="text-gray-500">M</span>
-                          <span className="text-gray-500 pl-2">最高:</span>
-                          <NumericInput value={customFilters.maxVolume} onChange={(v) => updateCustomFilter('maxVolume', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
-                          <span className="text-gray-500">M</span>
-                        </div>
-                      </FilterToggleRow>
+                    <FilterToggleRow
+                      title="成交量範圍 (Volume)"
+                      description="設定篩選標的的當日成交量區間（以百萬股 M 為單位）。"
+                      isActive={customFilters.filterVolume}
+                      onToggle={(v) => updateCustomFilter('filterVolume', v)}
+                    >
+                      <div className="flex items-center space-x-2 text-xs">
+                        <span className="text-gray-500">最低:</span>
+                        <NumericInput value={customFilters.minVolume} onChange={(v) => updateCustomFilter('minVolume', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                        <span className="text-gray-500">M</span>
+                        <span className="text-gray-500 pl-2">最高:</span>
+                        <NumericInput value={customFilters.maxVolume} onChange={(v) => updateCustomFilter('maxVolume', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-24 text-right focus:outline-none focus:border-indigo-500" />
+                        <span className="text-gray-500">M</span>
+                      </div>
+                    </FilterToggleRow>
 
-                      <FilterToggleRow
-                        title="股票價格範圍 ($)"
-                        description="過濾標的的股價上下限區間。"
-                        isActive={customFilters.filterPrice}
-                        onToggle={(v) => updateCustomFilter('filterPrice', v)}
-                      >
-                        <div className="flex items-center space-x-2 text-xs">
-                          <span className="text-gray-500">最低:</span>
-                          <NumericInput step={0.01} value={customFilters.minPrice} onChange={(v) => updateCustomFilter('minPrice', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
-                          <span className="text-gray-500">$</span>
-                          <span className="text-gray-500 pl-2">最高:</span>
-                          <NumericInput step={0.01} value={customFilters.maxPrice} onChange={(v) => updateCustomFilter('maxPrice', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
-                          <span className="text-gray-500">$</span>
-                        </div>
-                      </FilterToggleRow>
-                    </div>
+                    <FilterToggleRow
+                      title="股票價格範圍 ($)"
+                      description="過濾標的的股價上下限區間。"
+                      isActive={customFilters.filterPrice}
+                      onToggle={(v) => updateCustomFilter('filterPrice', v)}
+                    >
+                      <div className="flex items-center space-x-2 text-xs">
+                        <span className="text-gray-500">最低:</span>
+                        <NumericInput step={0.01} value={customFilters.minPrice} onChange={(v) => updateCustomFilter('minPrice', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                        <span className="text-gray-500">$</span>
+                        <span className="text-gray-500 pl-2">最高:</span>
+                        <NumericInput step={0.01} value={customFilters.maxPrice} onChange={(v) => updateCustomFilter('maxPrice', v)} className="bg-gray-900 border border-gray-800 rounded-xl px-2 py-1.5 text-white w-20 text-right focus:outline-none focus:border-indigo-500" />
+                        <span className="text-gray-500">$</span>
+                      </div>
+                    </FilterToggleRow>
+                  </div>
                 </div>
               </details>
             </div>

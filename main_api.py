@@ -249,6 +249,8 @@ class RealtimeTickRequest(BaseModel):
     max_mc_m: float = 5000.0
     min_float_m: float = 0.0
     max_float_m: float = 500.0
+    min_volume_m: float = 0.0
+    max_volume_m: float = 500.0
     min_price: float = 0.0
     max_price: float = 0.0
     filter_price: bool = True
@@ -258,6 +260,7 @@ class RealtimeTickRequest(BaseModel):
     filter_interval: bool = True
     filter_mc: bool = True
     filter_float: bool = True
+    filter_volume: bool = False
     strict_filter: bool = False
     watchlist: Dict[str, Any] = {}
     custom_tickers: List[str] = []
@@ -784,6 +787,9 @@ def post_screener_tick(req: RealtimeTickRequest):
         float_shares = GLOBAL_FLOATS_CACHE.get(ticker, 0)
         float_m = float_shares / 1e6 if float_shares else 0
 
+        volume = q.get("volume", 0)
+        vol_m = volume / 1e6 if volume else 0
+
         # Calculate recent N-minute max gain from ring buffer
         cutoff = ts - window_secs
         buf = PRICE_BUFFER.get(ticker, deque())
@@ -816,7 +822,12 @@ def post_screener_tick(req: RealtimeTickRequest):
             if req.min_price > 0: cond_price = cond_price and (price >= req.min_price)
             if req.max_price > 0: cond_price = cond_price and (price <= req.max_price)
 
-        is_passed = cond_gap and cond_gainer and cond_intraday and cond_interval and cond_mc and cond_float and cond_price
+        cond_volume = True
+        if req.filter_volume:
+            if req.min_volume_m > 0: cond_volume = cond_volume and (vol_m >= req.min_volume_m)
+            if req.max_volume_m > 0: cond_volume = cond_volume and (vol_m <= req.max_volume_m)
+
+        is_passed = cond_gap and cond_gainer and cond_intraday and cond_interval and cond_mc and cond_float and cond_price and cond_volume
 
         if req.strict_filter and not is_passed:
             continue
