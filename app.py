@@ -97,7 +97,8 @@ with st.sidebar.expander("基礎配置與輸入", expanded=True):
     period = st.selectbox("資料期間", ["1mo", "3mo", "6mo", "1y", "2y", "5y", "max"], index=4)
 
 with st.sidebar.expander("技術指標篩選 (Client-Side)", expanded=False):
-    sma_window = st.number_input("SMA 天數", value=50, step=5)
+    sma_window = st.number_input("SMA1 天數", value=20, step=5)
+    sma_window_2 = st.number_input("SMA2 天數", value=50, step=5)
     show_sma_cols = st.checkbox("在報表中顯示 SMA 相關欄位", value=False)
     # rsi_limit = st.number_input("RSI 上限 (找超賣)", value=30, step=5)
     # bb_window = st.number_input("布林通道天數", value=20, step=1)
@@ -253,6 +254,8 @@ if start_scan:
                 return None
             
             df = add_sma(df, window=sma_window)
+            if sma_window_2 > 0:
+                df = add_sma(df, window=sma_window_2)
             # df = add_rsi(df, window=14)
             # df = add_macd(df)
             # df = add_bollinger_bands(df, window=bb_window)
@@ -282,6 +285,7 @@ if start_scan:
             sector_info = info.get('sector', 'N/A')
             
             cond_price_sma = latest_data['Close'] > latest_data[f'SMA_{sma_window}']
+            cond_price_sma_2 = latest_data['Close'] > latest_data.get(f'SMA_{sma_window_2}', 0) if f'SMA_{sma_window_2}' in latest_data else False
             # cond_rsi = latest_data['RSI_14'] < rsi_limit
             # cond_bb_lower = latest_data['Close'] < latest_data[f'BB_Lower_{bb_window}']
             cond_return_1d = latest_data['Return_1d'] >= min_1d_return
@@ -305,7 +309,10 @@ if start_scan:
             }
             if show_sma_cols:
                 result_dict[f"SMA_{sma_window}"] = round(latest_data[f'SMA_{sma_window}'], 2)
-                result_dict["Price > SMA"] = "✅" if cond_price_sma else "❌"
+                result_dict[f"價 > SMA ({sma_window})"] = "✅" if cond_price_sma else "❌"
+                if f'SMA_{sma_window_2}' in latest_data:
+                    result_dict[f"SMA_{sma_window_2}"] = round(latest_data[f'SMA_{sma_window_2}'], 2)
+                    result_dict[f"價 > SMA ({sma_window_2})"] = "✅" if cond_price_sma_2 else "❌"
                 
             result_dict["_PassStrict"] = is_strict_passed
             return {"ticker": ticker, "df": df, "result_dict": result_dict}
@@ -365,8 +372,8 @@ if not results_df.empty and raw_data_dict:
     ext_ret_list = []
     ext_vol_list = []
     adv_ret_list = []
-    sma_val_list = []
-    price_sma_list = []
+    sma_val_list, sma_val_2_list = [], []
+    price_sma_list, price_sma_2_list = [], []
     
     float_dict = {}
     if strict_history_filter and strategy_select == "4.曾經單日漲幅Breakout" and fmp_api_key:
@@ -530,9 +537,14 @@ if not results_df.empty and raw_data_dict:
             ext_vol_list.append(ext_vol if 'ext_vol' in locals() else 0.0)
             
             latest_sma = df[f'SMA_{sma_window}'].iloc[-1] if f'SMA_{sma_window}' in df.columns else 0.0
-            price_sma_cond = df['Close'].iloc[-1] > latest_sma if len(df) > 0 else False
+            price_sma_cond = df['Close'].iloc[-1] > latest_sma if len(df) > 0 and latest_sma > 0 else False
             sma_val_list.append(round(latest_sma, 2))
             price_sma_list.append("✅" if price_sma_cond else "❌")
+            
+            latest_sma_2 = df[f'SMA_{sma_window_2}'].iloc[-1] if f'SMA_{sma_window_2}' in df.columns else 0.0
+            price_sma_cond_2 = df['Close'].iloc[-1] > latest_sma_2 if len(df) > 0 and latest_sma_2 > 0 else False
+            sma_val_2_list.append(round(latest_sma_2, 2))
+            price_sma_2_list.append("✅" if price_sma_cond_2 else "❌")
         else:
             ret_1d_list.append(0.0)
             ret_nd_list.append(0.0)
@@ -549,10 +561,14 @@ if not results_df.empty and raw_data_dict:
             adv_ret_list.append("N/A")
             sma_val_list.append(0.0)
             price_sma_list.append("❌")
+            sma_val_2_list.append(0.0)
+            price_sma_2_list.append("❌")
             
     if show_sma_cols:
         results_df[f"SMA_{sma_window}"] = sma_val_list
-        results_df["Price > SMA"] = price_sma_list
+        results_df[f"價 > SMA ({sma_window})"] = price_sma_list
+        results_df[f"SMA_{sma_window_2}"] = sma_val_2_list
+        results_df[f"價 > SMA ({sma_window_2})"] = price_sma_2_list
         
     # Pandas DataFrame conditionally add columns based on strict filters
     if strict_return_filter:
@@ -673,7 +689,7 @@ with tab2:
     with col1:
         selected_ticker = st.selectbox("選擇股票代碼", available_tickers)
         show_bb = st.checkbox("顯示布林通道", value=False)
-        show_sma = st.checkbox(f"顯示 SMA ({sma_window})", value=True)
+        show_sma = st.checkbox(f"顯示 SMA ({sma_window}, {sma_window_2})", value=True)
         
     with col2:
         chart_df = raw_data_dict[selected_ticker]
@@ -684,8 +700,12 @@ with tab2:
                     name='K線', increasing_line_color='cyan', decreasing_line_color='gray'))
         
         if show_sma:
-            fig.add_trace(go.Scatter(x=chart_df.index, y=chart_df[f'SMA_{sma_window}'], 
-                                     line=dict(color='orange', width=2), name=f'SMA {sma_window}'))
+            if f'SMA_{sma_window}' in chart_df.columns:
+                fig.add_trace(go.Scatter(x=chart_df.index, y=chart_df[f'SMA_{sma_window}'], 
+                                         line=dict(color='orange', width=2), name=f'SMA {sma_window}'))
+            if f'SMA_{sma_window_2}' in chart_df.columns:
+                fig.add_trace(go.Scatter(x=chart_df.index, y=chart_df[f'SMA_{sma_window_2}'], 
+                                         line=dict(color='blue', width=2), name=f'SMA {sma_window_2}'))
         
         if show_bb and f'BB_Upper_{bb_window}' in chart_df.columns:
             fig.add_trace(go.Scatter(x=chart_df.index, y=chart_df[f'BB_Upper_{bb_window}'], 

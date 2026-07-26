@@ -101,7 +101,8 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   const [limit, setLimit] = useState<number>(5000);
 
   // Indicators
-  const [smaWindow, setSmaWindow] = useState<number>(50);
+  const [smaWindow, setSmaWindow] = useState<number>(20);
+  const [smaWindow2, setSmaWindow2] = useState<number>(50);
   const [showSmaCols, setShowSmaCols] = useState<boolean>(false);
 
   // Return filters
@@ -257,6 +258,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
       fmp_server_params: null,
       period: period,
       sma_window: smaWindow,
+      sma_window_2: smaWindow2,
       show_sma_cols: showSmaCols,
       min_1d_return: min1dReturn,
       n_days_return: nDaysReturn,
@@ -346,7 +348,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
     try {
       // 1. Fetch historical candle data
       const histResponse = await axios.get(
-        `${BASE_URL}/api/stocks/${ticker}/historical?provider=${dataSource}&period=2y&sma_window=${smaWindow}&api_key=${apiKey}`
+        `${BASE_URL}/api/stocks/${ticker}/historical?provider=${dataSource}&period=2y&sma_window=${smaWindow}&sma_window_2=${smaWindow2}&api_key=${apiKey}`
       );
       setChartData(histResponse.data.data);
 
@@ -386,7 +388,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   const isReturnKey = (k: string) => /^\d+日漲幅\(%\)$/.test(k) || /^\d+日漲幅達標$/.test(k);
   const isVolKey = (k: string) => k === "RVOL (倍)" || k === "爆量達標";
   const isBaseKey = (k: string) => ["Ticker", "Name", "Sector", "Market Cap", "Close"].includes(k);
-  const isSmaKey = (k: string) => k.startsWith("SMA_") || k === "Price > SMA";
+  const isSmaKey = (k: string) => k.startsWith("SMA_") || k === "Price > SMA" || k.startsWith("價 > SMA");
   const isNewsKey = (k: string) => k === "📰 News";
 
   const historyKeys = results[0] ? Object.keys(results[0]).filter(k =>
@@ -409,8 +411,10 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
 
     const extraCols: any[] = [];
     if (showSmaCols) {
-      extraCols.push({ field: `SMA_${smaWindow}`, headerName: `SMA (${smaWindow})`, cellRenderer: (p: any) => p.value !== null ? `$${p.value}` : '-' });
-      extraCols.push({ field: 'Price > SMA', headerName: '價 > SMA' });
+      extraCols.push({ field: `SMA_${smaWindow}`, headerName: `SMA (${smaWindow})`, cellRenderer: (p: any) => p.value !== null && p.value !== undefined ? `$${p.value}` : '-' });
+      extraCols.push({ field: `價 > SMA (${smaWindow})`, headerName: `價 > SMA (${smaWindow})`, cellRenderer: (p: any) => p.value || '-' });
+      extraCols.push({ field: `SMA_${smaWindow2}`, headerName: `SMA (${smaWindow2})`, cellRenderer: (p: any) => p.value !== null && p.value !== undefined ? `$${p.value}` : '-' });
+      extraCols.push({ field: `價 > SMA (${smaWindow2})`, headerName: `價 > SMA (${smaWindow2})`, cellRenderer: (p: any) => p.value || '-' });
     }
 
     if (strictReturnFilter) {
@@ -443,7 +447,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
     };
 
     return [...baseCols, ...extraCols, actionCol];
-  }, [filteredResults, showSmaCols, strictReturnFilter, strictVolFilter, strictHistoryFilter, smaWindow, returnKeys, volKeys, historyKeys]);
+  }, [filteredResults, showSmaCols, strictReturnFilter, strictVolFilter, strictHistoryFilter, smaWindow, smaWindow2, returnKeys, volKeys, historyKeys]);
 
   // Export results to CSV
   const handleExportCsv = () => {
@@ -629,10 +633,18 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
             <div className="space-y-3 pt-4 border-t border-gray-800/80">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">技術指標與顯示</h3>
               <div className="flex items-center justify-between">
-                <label className="text-sm text-gray-300">SMA 移動平均天數</label>
+                <label className="text-sm text-gray-300">SMA1 移動平均天數</label>
                 <NumericInput
                   value={smaWindow}
                   onChange={setSmaWindow}
+                  className="w-16 bg-gray-900 border border-gray-800 rounded-xl px-2 py-1 text-sm text-center text-white"
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <label className="text-sm text-gray-300">SMA2 移動平均天數</label>
+                <NumericInput
+                  value={smaWindow2}
+                  onChange={setSmaWindow2}
                   className="w-16 bg-gray-900 border border-gray-800 rounded-xl px-2 py-1 text-sm text-center text-white"
                 />
               </div>
@@ -1042,7 +1054,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   {/* Left: TV interactive chart */}
                   <div className="lg:col-span-2 space-y-3">
-                    <TradingViewChart data={chartData} smaWindow={smaWindow} showSma={showSmaCols} />
+                    <TradingViewChart data={chartData} smaWindow={smaWindow} smaWindow2={smaWindow2} showSma={showSmaCols} />
                   </div>
 
                   {/* Right: Info and News Catalyst */}

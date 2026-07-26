@@ -191,7 +191,8 @@ class ScanRequest(BaseModel):
     tickers: List[str] = []
     fmp_server_params: Optional[Dict[str, Any]] = None
     period: str = "1y"
-    sma_window: int = 50
+    sma_window: int = 20
+    sma_window_2: Optional[int] = 50
     show_sma_cols: bool = False
     min_1d_return: float = 50.0
     n_days_return: int = 5
@@ -344,7 +345,8 @@ def get_historical(
     provider: str = "Yahoo Finance",
     period: str = "1y",
     api_key: Optional[str] = None,
-    sma_window: int = 50
+    sma_window: int = 20,
+    sma_window_2: Optional[int] = 50
 ):
     key = api_key or os.environ.get("FMP_API_KEY", "")
     try:
@@ -359,6 +361,8 @@ def get_historical(
             raise HTTPException(status_code=404, detail=f"No data found for ticker {ticker}")
 
         df = add_sma(df, window=sma_window)
+        if sma_window_2 and sma_window_2 > 0:
+            df = add_sma(df, window=sma_window_2)
         
         # Standardize index name to prevent KeyError on different providers
         df.index.name = 'date'
@@ -377,6 +381,10 @@ def get_historical(
             sma_col = f"SMA_{sma_window}"
             if sma_col in row and not pd.isna(row[sma_col]):
                 item["sma"] = float(row[sma_col])
+            if sma_window_2 and sma_window_2 > 0:
+                sma2_col = f"SMA_{sma_window_2}"
+                if sma2_col in row and not pd.isna(row[sma2_col]):
+                    item["sma2"] = float(row[sma2_col])
             data.append(item)
 
         return sanitize_value({
@@ -500,6 +508,8 @@ def post_scan(req: ScanRequest):
         
         # Add SMA
         df = add_sma(df, window=req.sma_window)
+        if req.sma_window_2 and req.sma_window_2 > 0:
+            df = add_sma(df, window=req.sma_window_2)
         latest_data = df.iloc[-1]
         
         # Basic calculations
@@ -511,6 +521,9 @@ def post_scan(req: ScanRequest):
         rvol = (vol_today / vol_sma_20) if vol_sma_20 > 0 else 0.0
         
         cond_price_sma = latest_data['Close'] > latest_data[f'SMA_{req.sma_window}']
+        cond_price_sma_2 = False
+        if req.sma_window_2 and req.sma_window_2 > 0 and f'SMA_{req.sma_window_2}' in latest_data and not pd.isna(latest_data[f'SMA_{req.sma_window_2}']):
+            cond_price_sma_2 = latest_data['Close'] > latest_data[f'SMA_{req.sma_window_2}']
         cond_1d = r1 >= req.min_1d_return
         cond_nd = rn >= req.min_nd_return
         
@@ -665,7 +678,11 @@ def post_scan(req: ScanRequest):
 
         if req.show_sma_cols:
             row_dict[f"SMA_{req.sma_window}"] = round(float(latest_data[f'SMA_{req.sma_window}']), 2)
-            row_dict["Price > SMA"] = "✅" if cond_price_sma else "❌"
+            row_dict[f"價 > SMA ({req.sma_window})"] = "✅" if cond_price_sma else "❌"
+            if req.sma_window_2 and req.sma_window_2 > 0:
+                val2 = latest_data.get(f'SMA_{req.sma_window_2}')
+                row_dict[f"SMA_{req.sma_window_2}"] = round(float(val2), 2) if (val2 is not None and not pd.isna(val2)) else "N/A"
+                row_dict[f"價 > SMA ({req.sma_window_2})"] = "✅" if cond_price_sma_2 else "❌"
 
         # Always attach return metrics
         row_dict["1日漲幅(%)"] = round(r1, 2)

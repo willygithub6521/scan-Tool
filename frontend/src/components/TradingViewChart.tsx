@@ -5,14 +5,16 @@ import type { ISeriesApi, CandlestickData, LineData, Time } from 'lightweight-ch
 interface ChartProps {
   data: any[];
   smaWindow?: number;
+  smaWindow2?: number;
   showSma?: boolean;
 }
 
-export const TradingViewChart: React.FC<ChartProps> = ({ data, smaWindow = 50, showSma = true }) => {
+export const TradingViewChart: React.FC<ChartProps> = ({ data, smaWindow = 20, smaWindow2 = 50, showSma = true }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick', Time> | null>(null);
   const smaSeriesRef = useRef<ISeriesApi<'Line', Time> | null>(null);
+  const sma2SeriesRef = useRef<ISeriesApi<'Line', Time> | null>(null);
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -47,8 +49,15 @@ export const TradingViewChart: React.FC<ChartProps> = ({ data, smaWindow = 50, s
       title: `SMA ${smaWindow}`,
     });
 
+    const sma2Series = chart.addSeries(LineSeries, {
+      color: '#3B82F6',
+      lineWidth: 2,
+      title: `SMA ${smaWindow2}`,
+    });
+
     candleSeriesRef.current = candleSeries;
     smaSeriesRef.current = smaSeries;
+    sma2SeriesRef.current = sma2Series;
     chartRef.current = chart;
 
     const handleResize = () => {
@@ -63,10 +72,10 @@ export const TradingViewChart: React.FC<ChartProps> = ({ data, smaWindow = 50, s
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [smaWindow]);
+  }, [smaWindow, smaWindow2]);
 
   useEffect(() => {
-    if (!candleSeriesRef.current || !smaSeriesRef.current || !data) return;
+    if (!candleSeriesRef.current || !smaSeriesRef.current || !sma2SeriesRef.current || !data) return;
 
     // Filter and map candlestick data
     const candles: CandlestickData[] = data.map(d => ({
@@ -87,8 +96,17 @@ export const TradingViewChart: React.FC<ChartProps> = ({ data, smaWindow = 50, s
           value: d.sma,
         }));
       smaSeriesRef.current.setData(smaData);
+
+      const sma2Data: LineData[] = data
+        .filter(d => d.sma2 !== undefined && d.sma2 !== null)
+        .map(d => ({
+          time: d.time,
+          value: d.sma2,
+        }));
+      sma2SeriesRef.current.setData(sma2Data);
     } else {
       smaSeriesRef.current.setData([]);
+      sma2SeriesRef.current.setData([]);
     }
 
     if (chartRef.current) {
