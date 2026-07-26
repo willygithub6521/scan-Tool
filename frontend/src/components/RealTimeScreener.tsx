@@ -1116,6 +1116,7 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                           <th className="py-4 px-6 text-right">市值</th>
                           <th className="py-4 px-6 text-right">流通量</th>
                           <th className="py-4 px-6 text-center">達標</th>
+                          <th className="py-4 px-6 text-center">News</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-800/80">
@@ -1148,12 +1149,22 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
                                     {row["達標 Signal"]}
                                   </span>
                                 </td>
+                                <td className="py-3.5 px-6 text-center">
+                                  <button
+                                    onClick={() => handleOpenNews(row.Ticker)}
+                                    className="bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center space-x-1 transition-colors cursor-pointer mx-auto"
+                                    title="查看新聞"
+                                  >
+                                    <Newspaper size={14} />
+                                    <span>News</span>
+                                  </button>
+                                </td>
                               </tr>
                             );
                           })
                         ) : (
                           <tr>
-                            <td colSpan={10} className="py-12 text-center text-gray-500 font-medium">
+                            <td colSpan={11} className="py-12 text-center text-gray-500 font-medium">
                               自訂監控名單中沒有符合您過濾條件的標的。
                             </td>
                           </tr>
