@@ -523,6 +523,7 @@ def post_scan(req: ScanRequest):
         ext_ret = 0.0
         adv_ret = "N/A"
         qm_recent_ret = 0.0
+        ext_vol = 0.0
 
         if req.strategy_select == "1.Extended Short":
             daily_ret = (df['Close'] / df['Close'].shift(1) - 1) * 100
@@ -561,6 +562,7 @@ def post_scan(req: ScanRequest):
                 latest_date_idx = df[valid_mask].index[-1]
                 ext_date = latest_date_idx.strftime('%Y-%m-%d')
                 ext_ret = float(daily_ret.loc[latest_date_idx])
+                ext_vol = float(df.loc[latest_date_idx, 'Volume']) / 1e6
                 if req.hist_cfg.get('enable_adv'):
                     n_days = req.hist_cfg.get('adv_n_days', 1)
                     future_ret = (df['Close'].shift(-n_days) / df['Close'] - 1) * 100
@@ -598,6 +600,7 @@ def post_scan(req: ScanRequest):
                 latest_date_idx = df[valid_mask].index[-1]
                 ext_date = latest_date_idx.strftime('%Y-%m-%d')
                 ext_ret = float(gap_up.loc[latest_date_idx])
+                ext_vol = float(df.loc[latest_date_idx, 'Volume']) / 1e6
 
         elif req.strategy_select == "3.QullaMaggie Breakout":
             qm_days = int(req.hist_cfg.get('qm_days', 20))
@@ -606,6 +609,8 @@ def post_scan(req: ScanRequest):
                 qm_recent_ret = float(rolling_ret.iloc[-1])
                 qm_min_ret = req.hist_cfg.get('qm_min_ret', 30.0)
                 hist_match = bool(qm_recent_ret >= qm_min_ret)
+                if hist_match:
+                    ext_vol = float(df['Volume'].iloc[-1]) / 1e6
             else:
                 hist_match = False
 
@@ -674,16 +679,19 @@ def post_scan(req: ScanRequest):
             hist_col_name = "歷史暴漲達標"
             row_dict["歷史暴漲日期"] = ext_date
             row_dict["歷史暴漲幅度(%)"] = round(ext_ret, 2)
+            row_dict["當日Volume(M)"] = round(ext_vol, 2) if ext_vol > 0 else 0
             if req.hist_cfg.get('enable_adv'):
                 row_dict[f"隔{req.hist_cfg.get('adv_n_days', 1)}日漲跌幅(%)"] = adv_ret
         elif req.strategy_select == "2.Fake Breakout Short":
             hist_col_name = "歷史假突破達標"
             row_dict["歷史假突破日期"] = ext_date
             row_dict["假突破Gap(%)"] = round(ext_ret, 2)
+            row_dict["當日Volume(M)"] = round(ext_vol, 2) if ext_vol > 0 else 0
         elif req.strategy_select == "3.QullaMaggie Breakout":
             hist_col_name = "QullaMaggie突破達標"
             qm_days = int(req.hist_cfg.get('qm_days', 20))
             row_dict[f"QM_{qm_days}日內近期漲幅(%)"] = round(qm_recent_ret, 2)
+            row_dict["當日Volume(M)"] = round(ext_vol, 2) if ext_vol > 0 else 0
         else:
             hist_col_name = "單日漲幅Breakout達標"
             qm_days = int(req.hist_cfg.get('qm_days', 20))

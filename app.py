@@ -395,6 +395,7 @@ if not results_df.empty and raw_data_dict:
             qm_recent_ret = 0.0
             ext_date = ""
             ext_ret = 0.0
+            ext_vol = 0.0
             adv_ret = "N/A"
             if len(df) >= 2:
                 if strategy_select == "1.Extended Short":
@@ -431,6 +432,7 @@ if not results_df.empty and raw_data_dict:
                         latest_date_idx = df[valid_mask].index[-1]
                         ext_date = latest_date_idx.strftime('%Y-%m-%d')
                         ext_ret = daily_ret.loc[latest_date_idx]
+                        ext_vol = df.loc[latest_date_idx, 'Volume'] / 1e6
                         if hist_cfg.get('enable_adv'):
                             adv_val = future_ret.loc[latest_date_idx]
                             adv_ret = round(adv_val, 2) if not pd.isna(adv_val) else "N/A"
@@ -462,6 +464,7 @@ if not results_df.empty and raw_data_dict:
                         latest_date_idx = df[valid_mask].index[-1]
                         ext_date = latest_date_idx.strftime('%Y-%m-%d')
                         ext_ret = gap_up.loc[latest_date_idx]
+                        ext_vol = df.loc[latest_date_idx, 'Volume'] / 1e6
                 elif strategy_select == "3.QullaMaggie Breakout":
                     qm_days = int(hist_cfg['qm_days'])
                     if len(df) >= qm_days + 1:
@@ -469,6 +472,8 @@ if not results_df.empty and raw_data_dict:
                         # hist_match = (rolling_ret >= hist_cfg['qm_min_ret']).any() //歷史曾經設定天數內達標過
                         qm_recent_ret = rolling_ret.iloc[-1]
                         hist_match = bool(qm_recent_ret >= hist_cfg['qm_min_ret']) if not pd.isna(qm_recent_ret) else False
+                        if hist_match:
+                            ext_vol = df['Volume'].iloc[-1] / 1e6
                     else:
                         hist_match = False
                 elif strategy_select == "4.曾經單日漲幅Breakout":
@@ -562,16 +567,19 @@ if not results_df.empty and raw_data_dict:
             hist_col_name = "歷史暴漲達標"
             results_df["歷史暴漲日期"] = ext_date_list
             results_df["歷史暴漲幅度(%)"] = ext_ret_list
+            results_df["當日Volume(M)"] = [round(v, 2) if v > 0 else 0 for v in ext_vol_list]
             if hist_cfg.get('enable_adv'):
                 results_df[f"隔{hist_cfg['adv_n_days']}日漲跌幅(%)"] = adv_ret_list
         elif strategy_select == "2.Fake Breakout Short":
             hist_col_name = "歷史假突破達標"
             results_df["歷史假突破日期"] = ext_date_list
             results_df["假突破Gap(%)"] = ext_ret_list
+            results_df["當日Volume(M)"] = [round(v, 2) if v > 0 else 0 for v in ext_vol_list]
         elif strategy_select == "3.QullaMaggie Breakout":
             hist_col_name = "QullaMaggie突破達標"
             qm_days = int(hist_cfg.get('qm_days', 20))
             results_df[f"QM_{qm_days}日內近期漲幅(%)"] = qm_recent_ret_list
+            results_df["當日Volume(M)"] = [round(v, 2) if v > 0 else 0 for v in ext_vol_list]
         else:
             hist_col_name = "單日漲幅Breakout達標"
             qm_days = int(hist_cfg.get('qm_days', 20))

@@ -257,12 +257,20 @@ export const RealTimeScreener: React.FC<RealTimeScreenerProps> = ({ apiKey, BASE
     minFloat: 0.0, maxFloat: 500.0, filterFloat: true,
     minVolume: 1.0, maxVolume: 500.0, filterVolume: false,
     minPrice: 0.0, maxPrice: 1000.0, filterPrice: true,
-    strictFilter: true,
+    strictFilter: false,
   };
 
   const [customFilters, setCustomFilters] = useState(() => {
     const saved = localStorage.getItem('RTS_customFilters');
-    return saved ? JSON.parse(saved) : defaultCustomFilters;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return { ...defaultCustomFilters, ...parsed };
+      } catch (e) {
+        return defaultCustomFilters;
+      }
+    }
+    return defaultCustomFilters;
   });
 
   const updateCustomFilter = (key: string, value: any) => {
