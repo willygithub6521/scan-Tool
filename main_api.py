@@ -31,7 +31,7 @@ from data_fetcher import (
     get_realtime_1min_closes,   # [DEPRECATED] kept for /api/screener/realtime backward compat
     get_intraday_data
 )
-from indicators import add_sma
+from indicators import add_sma, calculate_compression_factor, calculate_ad_divergence, calculate_volume_profile
 from backtrader_engine import run_backtrader, run_backtrader_5min
 
 app = FastAPI(title="Stock Scanner API", version="1.0.0")
@@ -199,7 +199,7 @@ class ScanRequest(BaseModel):
     min_nd_return: float = 50.0
     match_logic: str = "OR (任一條件達標即可)"  # "OR (任一條件達標即可)" or "AND (全部條件皆須達標)"
     strict_return_filter: bool = False
-    strategy_select: str = "1.Extended Short"  # "1.Extended Short", "2.Fake Breakout Short", "3.QullaMaggie Breakout", "4.曾經單日漲幅Breakout"
+    strategy_select: str = "1.Extended Short"  # "1.Extended Short", "2.Fake Breakout Short", "3.QullaMaggie Breakout", "4.曾經單日漲幅Breakout", "5.Volume Accumulation (築底吸籌)"
     hist_cfg: Dict[str, Any] = {}
     strict_history_filter: bool = False
     vol_multiplier: float = 10.0
@@ -453,7 +453,7 @@ def post_scan(req: ScanRequest):
         if not tickers:
             return sanitize_value({"results": []})
 
-    if req.strategy_select == "4.曾經單日漲幅Breakout" and key:
+    if req.strategy_select in ["4.曾經單日漲幅Breakout", "5.Volume Accumulation (築底吸籌)"] and key:
         try:
             get_floats_optimized(key, tickers)
         except Exception as e:
@@ -537,6 +537,14 @@ def post_scan(req: ScanRequest):
         adv_ret = "N/A"
         qm_recent_ret = 0.0
         ext_vol = 0.0
+        
+        # Volume Accumulation variables
+        va_score = 0
+        va_cf = 1.0
+        va_ad_div = False
+        va_poc = 0.0
+        va_top3_pct = 0.0
+        va_turnover = "N/A"
 
         if req.strategy_select == "1.Extended Short":
             daily_ret = (df['Close'] / df['Close'].shift(1) - 1) * 100
@@ -659,6 +667,55 @@ def post_scan(req: ScanRequest):
                 ext_date = ""
                 ext_vol = 0.0
 
+        elif req.strategy_select == "5.Volume Accumulation (築底吸籌)":
+            lookback_bars = int(req.hist_cfg.get("lookback_bars", 60))
+            max_mc_m = float(req.hist_cfg.get("max_market_cap_m", 500.0))
+            min_rvol_setting = float(req.hist_cfg.get("min_rvol", 1.5))
+            min_score_setting = int(req.hist_cfg.get("min_score", 75))
+            
+            curr_price = float(df['Close'].iloc[-1])
+            mkt_cap_num = info.get('marketCap', 0)
+            mkt_cap_m = (float(mkt_cap_num) / 1e6) if isinstance(mkt_cap_num, (int, float)) and mkt_cap_num > 0 else 0.0
+            
+            universe_ok = (0.50 <= curr_price <= 20.00) and (mkt_cap_m == 0.0 or mkt_cap_m <= max_mc_m)
+            
+            float_val = GLOBAL_FLOATS_CACHE.get(ticker, 0.0)
+            if float_val and float_val > 0:
+                turnover_rate = (vol_today / float_val) * 100.0
+                va_turnover = round(float(turnover_rate), 2)
+            else:
+                turnover_rate = -1.0
+                va_turnover = "N/A"
+                
+            va_cf = calculate_compression_factor(df, window=lookback_bars)
+            _, _, va_ad_div = calculate_ad_divergence(df, window=lookback_bars)
+            vp_res = calculate_volume_profile(df, window=lookback_bars, bins=50)
+            va_poc = vp_res.get("poc", 0.0)
+            va_top3_pct = vp_res.get("top_3_vol_pct", 0.0)
+            
+            if va_cf <= 0.75:
+                s_cf = 25
+            elif va_cf < 1.0:
+                s_cf = int(25 * (1.0 - va_cf) / 0.25)
+            else:
+                s_cf = 0
+                
+            s_ad = 25 if va_ad_div else 0
+            
+            rvol_score = 15 if rvol >= min_rvol_setting else int(15 * max(0.0, rvol) / max(min_rvol_setting, 0.1))
+            if turnover_rate >= 0:
+                turnover_score = 10 if turnover_rate >= 3.0 else int(10 * max(0.0, turnover_rate) / 3.0)
+            else:
+                turnover_score = int(10 * min(1.0, max(0.0, rvol) / max(min_rvol_setting, 0.1)))
+            s_vol = min(25, rvol_score + turnover_score)
+            
+            s_vp_conc = 15 if va_top3_pct >= 35.0 else int(15 * min(1.0, va_top3_pct / 35.0))
+            s_vp_poc = 10 if vp_res.get("near_poc", False) else 0
+            s_vp = min(25, s_vp_conc + s_vp_poc)
+            
+            va_score = min(100, max(0, s_cf + s_ad + s_vol + s_vp))
+            hist_match = bool(universe_ok and va_score >= min_score_setting)
+
         # Server-side filtering removed to allow client-side immediate toggle
         
         market_cap_val = info.get('marketCap', 'N/A')
@@ -709,7 +766,7 @@ def post_scan(req: ScanRequest):
             qm_days = int(req.hist_cfg.get('qm_days', 20))
             row_dict[f"QM_{qm_days}日內近期漲幅(%)"] = round(qm_recent_ret, 2)
             row_dict["當日Volume(M)"] = round(ext_vol, 2) if ext_vol > 0 else 0
-        else:
+        elif req.strategy_select == "4.曾經單日漲幅Breakout":
             hist_col_name = "單日漲幅Breakout達標"
             qm_days = int(req.hist_cfg.get('qm_days', 20))
             row_dict[f"過去{qm_days}日內最大單日漲幅(%)"] = round(qm_recent_ret, 2)
@@ -722,6 +779,18 @@ def post_scan(req: ScanRequest):
                 row_dict["📰 News"] = f"https://www.google.com/search?tbm=nws&q={ticker}+stock+{ext_date}"
             else:
                 row_dict["📰 News"] = ""
+        else:
+            hist_col_name = "築底吸籌達標"
+            row_dict["築底評分"] = va_score
+            row_dict["壓縮係數 (CF)"] = round(va_cf, 2)
+            row_dict["A/D背離達標"] = "✅" if va_ad_div else "❌"
+            row_dict["POC 價格($)"] = round(va_poc, 2)
+            row_dict["前3量區佔比(%)"] = round(va_top3_pct, 1)
+            row_dict["周轉率(%)"] = f"{va_turnover}%" if isinstance(va_turnover, (int, float)) else va_turnover
+            
+            fm = GLOBAL_FLOATS_CACHE.get(ticker, 0) / 1e6 if GLOBAL_FLOATS_CACHE.get(ticker, 0) else 0
+            row_dict["Float(M)"] = f"{fm:.2f}M" if fm > 0 else "N/A"
+            row_dict["TradingView"] = f"https://www.tradingview.com/chart/?symbol={ticker}"
         row_dict[hist_col_name] = "✅" if hist_match else "❌"
 
         # Always attach volume metrics

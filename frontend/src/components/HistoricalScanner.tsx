@@ -142,6 +142,12 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   const [minBodyRet, setMinBodyRet] = useState<number>(15.0);
   const [strictHistoryFilter, setStrictHistoryFilter] = useState<boolean>(false);
 
+  // Volume Accumulation (築底吸籌)
+  const [vaLookbackBars, setVaLookbackBars] = useState<number>(60);
+  const [vaMaxMktCapM, setVaMaxMktCapM] = useState<number>(500);
+  const [vaMinRVOL, setVaMinRVOL] = useState<number>(1.5);
+  const [vaMinScore, setVaMinScore] = useState<number>(75);
+
   // Volatility
   const [volMultiplier, setVolMultiplier] = useState<number>(10.0);
   const [strictVolFilter, setStrictVolFilter] = useState<boolean>(false);
@@ -287,6 +293,11 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
         qm_min_ret: qmMinRet,
         use_body_filter: useBodyFilter,
         min_body_ret: minBodyRet
+      } : strategySelect === '5.Volume Accumulation (築底吸籌)' ? {
+        lookback_bars: vaLookbackBars,
+        max_market_cap_m: vaMaxMktCapM,
+        min_rvol: vaMinRVOL,
+        min_score: vaMinScore
       } : {
         qm_days: qmDaysInputType === '依月份選擇' ? (qmSelMonth === '1個月' ? 21 : qmSelMonth === '3個月' ? 63 : 126) : qmDaysManual,
         qm_min_ret: qmMinRet
@@ -377,7 +388,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
     }
 
     if (strictHistoryFilter) {
-      const histKeys = ["歷史暴漲達標", "歷史假突破達標", "QullaMaggie突破達標", "單日漲幅Breakout達標"];
+      const histKeys = ["歷史暴漲達標", "歷史假突破達標", "QullaMaggie突破達標", "單日漲幅Breakout達標", "築底吸籌達標"];
       const passedAnyHist = histKeys.some(key => row[key] === '✅');
       if (!passedAnyHist) return false;
     }
@@ -389,7 +400,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   const isVolKey = (k: string) => k === "RVOL (倍)" || k === "爆量達標";
   const isBaseKey = (k: string) => ["Ticker", "Name", "Sector", "Market Cap", "Close"].includes(k);
   const isSmaKey = (k: string) => k.startsWith("SMA_") || k === "Price > SMA" || k.startsWith("價 > SMA");
-  const isNewsKey = (k: string) => k === "📰 News";
+  const isNewsKey = (k: string) => k === "📰 News" || k === "TradingView";
 
   const historyKeys = results[0] ? Object.keys(results[0]).filter(k =>
     !isBaseKey(k) && !isSmaKey(k) && !isReturnKey(k) && !isVolKey(k) && !isNewsKey(k)
@@ -423,8 +434,62 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
     if (strictVolFilter) {
       volKeys.forEach(k => extraCols.push({ field: k, headerName: k }));
     }
-    if (strictHistoryFilter) {
-      historyKeys.forEach(k => extraCols.push({ field: k, headerName: k }));
+    if (strictHistoryFilter || strategySelect === '5.Volume Accumulation (築底吸籌)') {
+      historyKeys.forEach(k => {
+        if (k === '築底評分') {
+          extraCols.push({
+            field: k,
+            headerName: '築底評分',
+            minWidth: 110,
+            cellRenderer: (p: any) => {
+              const val = p.value || 0;
+              const color = val >= 85 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                            val >= 75 ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30' :
+                            'bg-gray-800 text-gray-400 border border-gray-700';
+              return (
+                <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${color}`}>
+                  {val} 分
+                </span>
+              );
+            }
+          });
+        } else if (k === '壓縮係數 (CF)') {
+          extraCols.push({
+            field: k,
+            headerName: '壓縮係數 (CF)',
+            minWidth: 125,
+            cellRenderer: (p: any) => {
+              const val = p.value;
+              const isCompressed = typeof val === 'number' && val <= 0.75;
+              return (
+                <span className={isCompressed ? 'text-emerald-400 font-semibold flex items-center gap-1' : 'text-gray-300'}>
+                  {val} {isCompressed ? '🔥' : ''}
+                </span>
+              );
+            }
+          });
+        } else {
+          extraCols.push({ field: k, headerName: k });
+        }
+      });
+
+      if (results[0] && results[0]["TradingView"]) {
+        extraCols.push({
+          field: "TradingView",
+          headerName: 'TradingView',
+          minWidth: 125,
+          cellRenderer: (p: any) => p.value ? (
+            <a
+              href={p.value}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-indigo-400 hover:text-indigo-300 font-semibold text-xs flex items-center gap-1 underline decoration-indigo-500/50 transition-all hover:decoration-indigo-300"
+            >
+              <span>📈 K線圖表</span>
+            </a>
+          ) : '-'
+        });
+      }
     }
 
     const actionCol = {
@@ -714,6 +779,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                   <option value="2.Fake Breakout Short">2. Fake Breakout Short</option>
                   <option value="3.QullaMaggie Breakout">3. QullaMaggie Breakout</option>
                   <option value="4.曾經單日漲幅Breakout">4. 曾經單日漲幅Breakout</option>
+                  <option value="5.Volume Accumulation (築底吸籌)">5. Volume Accumulation (築底吸籌)</option>
                 </select>
               </div>
 
@@ -865,6 +931,109 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                 </div>
               )}
 
+              {strategySelect === '5.Volume Accumulation (築底吸籌)' && (
+                <div className="space-y-4 bg-gray-900/40 p-4 rounded-xl border border-gray-800 text-xs animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between border-b border-gray-800/60 pb-2">
+                    <span className="font-bold text-indigo-400 flex items-center gap-1.5 text-xs">
+                      <span>🔥 籌碼築底量化選股</span>
+                    </span>
+                    <span className="text-[10px] bg-indigo-500/10 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/20">FMP 專屬</span>
+                  </div>
+
+                  {/* Lookback Bars N */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <label className="text-gray-400 font-medium">回溯期間 (Lookback $N$)</label>
+                      <span className="bg-gray-800 text-indigo-300 font-mono text-xs px-2 py-0.5 rounded border border-gray-700 font-bold">{vaLookbackBars} 天</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="20"
+                      max="180"
+                      step="5"
+                      value={vaLookbackBars}
+                      onChange={(e) => setVaLookbackBars(Number(e.target.value))}
+                      className="w-full h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                    />
+                    <div className="flex justify-between text-[10px] text-gray-600 font-mono">
+                      <span>20 Bars</span>
+                      <span>預設 60</span>
+                      <span>180 Bars</span>
+                    </div>
+                  </div>
+
+                  {/* Max Market Cap */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <label className="text-gray-400 font-medium">市值上限 (Max MktCap)</label>
+                      <span className="bg-gray-800 text-indigo-300 font-mono text-xs px-2 py-0.5 rounded border border-gray-700 font-bold">${vaMaxMktCapM}M</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="10"
+                      max="2000"
+                      step="20"
+                      value={vaMaxMktCapM}
+                      onChange={(e) => setVaMaxMktCapM(Number(e.target.value))}
+                      className="w-full h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                    />
+                    <div className="flex justify-between text-[10px] text-gray-600 font-mono">
+                      <span>$10M</span>
+                      <span>預設 $500M</span>
+                      <span>$2,000M</span>
+                    </div>
+                  </div>
+
+                  {/* Min RVOL */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <label className="text-gray-400 font-medium">最低爆量 (Min RVOL)</label>
+                      <span className="bg-gray-800 text-emerald-400 font-mono text-xs px-2 py-0.5 rounded border border-gray-700 font-bold">{vaMinRVOL}x</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="1.0"
+                      max="5.0"
+                      step="0.1"
+                      value={vaMinRVOL}
+                      onChange={(e) => setVaMinRVOL(Number(e.target.value))}
+                      className="w-full h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                    />
+                    <div className="flex justify-between text-[10px] text-gray-600 font-mono">
+                      <span>1.0x</span>
+                      <span>預設 1.5x</span>
+                      <span>5.0x</span>
+                    </div>
+                  </div>
+
+                  {/* Min Score Filter */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <label className="text-gray-400 font-medium">評分門檻 (Min Score)</label>
+                      <span className="bg-indigo-950/80 text-amber-400 font-mono text-xs px-2.5 py-0.5 rounded-full border border-amber-500/30 font-bold shadow-sm">{vaMinScore} / 100</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="50"
+                      max="100"
+                      step="1"
+                      value={vaMinScore}
+                      onChange={(e) => setVaMinScore(Number(e.target.value))}
+                      className="w-full h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                    />
+                    <div className="flex justify-between text-[10px] text-gray-600 font-mono">
+                      <span>50分</span>
+                      <span>預設 75分</span>
+                      <span>100分</span>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-gray-400 leading-relaxed pt-1 border-t border-gray-800/50">
+                    💡 <span className="text-gray-300">策略簡析</span>：多因特徵建模，篩選價格壓縮(ATR)、A/D量價正背離、低發行量周轉率與 N-bar 籌碼精確鎖定 (POC 接近度與 TOP3 量區濃度 $\ge 35\%$)。
+                  </p>
+                </div>
+              )}
+
               <label className="flex items-center space-x-2 text-sm font-medium text-gray-300 cursor-pointer">
                 <input
                   type="checkbox"
@@ -873,7 +1042,9 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                   className="text-indigo-600 focus:ring-indigo-500 rounded"
                 />
                 <span className="ml-2 text-sm text-gray-300">
-                  啟用 {strategySelect === '3.QullaMaggie Breakout' ? 'QullaMaggie 突破' : '曾經單日漲幅Breakout'} 過濾 (獨立篩選)
+                  {strategySelect === '5.Volume Accumulation (築底吸籌)'
+                    ? '僅顯示築底評分達標之飆股 (剔除未達標)'
+                    : `啟用 ${strategySelect === '3.QullaMaggie Breakout' ? 'QullaMaggie 突破' : '曾經單日漲幅Breakout'} 過濾 (獨立篩選)`}
                 </span>
               </label>
             </div>
