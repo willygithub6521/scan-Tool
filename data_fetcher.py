@@ -408,7 +408,7 @@ def get_intraday_data(ticker: str, interval: str, from_date: str, to_date: str, 
 def get_realtime_biggest_gainers(api_key: str) -> list:
     # return FMPProvider(api_key).fetch_biggest_gainers()
     gainers = FMPProvider(api_key).fetch_biggest_gainers()
-    return gainers[:20] if gainers else []
+    return gainers[:40] if gainers else []
 
 def get_realtime_quotes(api_key: str, tickers: list) -> list:
     return FMPProvider(api_key).fetch_quotes(tickers)

@@ -589,7 +589,7 @@ if not results_df.empty and raw_data_dict:
         elif strategy_select == "2.Fake Breakout Short":
             hist_col_name = "歷史假突破達標"
             results_df["歷史假突破日期"] = ext_date_list
-            results_df["假突破Gap(%)"] = ext_ret_list
+            results_df["Gap(%)"] = ext_ret_list
             results_df["當日Volume(M)"] = [round(v, 2) if v > 0 else 0 for v in ext_vol_list]
         elif strategy_select == "3.QullaMaggie Breakout":
             hist_col_name = "QullaMaggie突破達標"

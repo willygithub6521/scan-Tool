@@ -537,6 +537,9 @@ def post_scan(req: ScanRequest):
         adv_ret = "N/A"
         qm_recent_ret = 0.0
         ext_vol = 0.0
+        ext_open_to_high = 0.0
+        ext_close_ret = 0.0
+        ext_clv = 0.0
         
         # Volume Accumulation variables
         va_score = 0
@@ -597,16 +600,28 @@ def post_scan(req: ScanRequest):
             range_size = (df['High'] - df['Low'])
             upper_shadow = (df['High'] - df[['Open', 'Close']].max(axis=1))
             shadow_ratio = (upper_shadow / range_size * 100).fillna(0)
+            open_to_high = (df['High'] / df['Open'] - 1) * 100
+            close_ret = (df['Close'] / df['Close'].shift(1) - 1) * 100
+            clv = ((df['Close'] - df['Low']) / range_size).fillna(0)
             
             min_gap = req.hist_cfg.get('min_gap', 30.0)
             min_vol_m = req.hist_cfg.get('min_vol_m', 10.0)
             min_prev_close = req.hist_cfg.get('min_prev_close', 1.0)
             min_shadow_ratio = req.hist_cfg.get('min_shadow_ratio', 60.0)
+            min_open_to_high = req.hist_cfg.get('min_open_to_high', 0.0)
+            clv_dir = req.hist_cfg.get('clv_direction', '<')
+            clv_th = req.hist_cfg.get('clv_threshold', 0.2)
             
             valid_mask = ((gap_up >= min_gap) & 
                           (vol_m >= min_vol_m) & 
                           (prev_close >= min_prev_close) & 
-                          (shadow_ratio >= min_shadow_ratio))
+                          (shadow_ratio >= min_shadow_ratio) &
+                          (open_to_high >= min_open_to_high))
+                          
+            if clv_dir == '>':
+                valid_mask = valid_mask & (clv >= clv_th)
+            else:
+                valid_mask = valid_mask & (clv <= clv_th)
                           
             if 'time_range' in req.hist_cfg:
                 min_m, max_m = req.hist_cfg['time_range']
@@ -622,6 +637,9 @@ def post_scan(req: ScanRequest):
                 ext_date = latest_date_idx.strftime('%Y-%m-%d')
                 ext_ret = float(gap_up.loc[latest_date_idx])
                 ext_vol = float(df.loc[latest_date_idx, 'Volume']) / 1e6
+                ext_open_to_high = float(open_to_high.loc[latest_date_idx])
+                ext_close_ret = float(close_ret.loc[latest_date_idx])
+                ext_clv = float(clv.loc[latest_date_idx])
 
         elif req.strategy_select == "3.QullaMaggie Breakout":
             qm_days = int(req.hist_cfg.get('qm_days', 20))
@@ -759,7 +777,10 @@ def post_scan(req: ScanRequest):
         elif req.strategy_select == "2.Fake Breakout Short":
             hist_col_name = "歷史假突破達標"
             row_dict["歷史假突破日期"] = ext_date
-            row_dict["假突破Gap(%)"] = round(ext_ret, 2)
+            row_dict["Gap(%)"] = round(ext_ret, 2)
+            row_dict["Open To High(%)"] = round(ext_open_to_high, 2)
+            row_dict["收盤漲幅(%)"] = round(ext_close_ret, 2)
+            row_dict["CLV"] = round(ext_clv, 2)
             row_dict["當日Volume(M)"] = round(ext_vol, 2) if ext_vol > 0 else 0
         elif req.strategy_select == "3.QullaMaggie Breakout":
             hist_col_name = "QullaMaggie突破達標"

@@ -130,6 +130,9 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   const [fbMinVolM, setFbMinVolM] = useState<number>(10.0);
   const [fbMinPrevClose, setFbMinPrevClose] = useState<number>(1.0);
   const [fbMinShadowRatio, setFbMinShadowRatio] = useState<number>(60.0);
+  const [fbMinOpenToHigh, setFbMinOpenToHigh] = useState<number>(0.0);
+  const [fbClvDirection, setFbClvDirection] = useState<'<' | '>'>('<');
+  const [fbClvThreshold, setFbClvThreshold] = useState<number>(0.2);
   const [fbTimeRangeMin, setFbTimeRangeMin] = useState<number>(0);
   const [fbTimeRangeMax, setFbTimeRangeMax] = useState<number>(12);
 
@@ -287,6 +290,9 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
         min_vol_m: fbMinVolM,
         min_prev_close: fbMinPrevClose,
         min_shadow_ratio: fbMinShadowRatio,
+        min_open_to_high: fbMinOpenToHigh,
+        clv_direction: fbClvDirection,
+        clv_threshold: fbClvThreshold,
         time_range: [fbTimeRangeMin, fbTimeRangeMax]
       } : strategySelect === '4.曾經單日漲幅Breakout' ? {
         qm_days: qmDaysInputType === '依月份選擇' ? (qmSelMonth === '1個月' ? 21 : qmSelMonth === '3個月' ? 63 : 126) : qmDaysManual,
@@ -862,6 +868,28 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                   <div>
                     <label className="text-gray-500 block">昨日收盤價大於 ($)</label>
                     <NumericInput value={fbMinPrevClose} onChange={setFbMinPrevClose} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                  </div>
+                  <div>
+                    <label className="text-gray-500 block">Open To High &gt; (%)</label>
+                    <NumericInput value={fbMinOpenToHigh} onChange={setFbMinOpenToHigh} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                  </div>
+                  <div>
+                    <label className="text-gray-500 block">收盤價落點 (CLV, 0~1)</label>
+                    <div className="flex space-x-2 mt-1">
+                      <select 
+                        value={fbClvDirection} 
+                        onChange={(e) => setFbClvDirection(e.target.value as '<' | '>')} 
+                        className="w-1/3 bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white text-xs"
+                      >
+                        <option value=">">大於 (&gt;)</option>
+                        <option value="<">小於 (&lt;)</option>
+                      </select>
+                      <NumericInput 
+                        value={fbClvThreshold} 
+                        onChange={setFbClvThreshold} 
+                        className="w-2/3 bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" 
+                      />
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 mt-2">
                     <div>
