@@ -116,6 +116,9 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   const [strategySelect, setStrategySelect] = useState<string>('1.Extended Short');
   const [extMinDailyRet, setExtMinDailyRet] = useState<number>(90.0);
   const [extMinBodyRet, setExtMinBodyRet] = useState<number>(70.0);
+  const [extMinPrevClose, setExtMinPrevClose] = useState<number>(1.0);
+  const [extClvDirection, setExtClvDirection] = useState<'<' | '>'>('<');
+  const [extClvThreshold, setExtClvThreshold] = useState<number>(0.2);
   const [extTimeRangeMin, setExtTimeRangeMin] = useState<number>(0);
   const [extTimeRangeMax, setExtTimeRangeMax] = useState<number>(12);
   const [extEnableAdv, setExtEnableAdv] = useState<boolean>(false);
@@ -278,6 +281,9 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
       hist_cfg: strategySelect === '1.Extended Short' ? {
         min_daily_ret: extMinDailyRet,
         min_body_ret: extMinBodyRet,
+        min_prev_close: extMinPrevClose,
+        clv_direction: extClvDirection,
+        clv_threshold: extClvThreshold,
         time_range: [extTimeRangeMin, extTimeRangeMax],
         enable_adv: extEnableAdv,
         adv_n_days: extAdvNDays,
@@ -322,7 +328,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
 
       for (let i = 0; i < finalTickers.length; i += chunkSize) {
         const chunk = finalTickers.slice(i, i + chunkSize);
-        
+
         // Filter prefetchedInfo to only include the current chunk to save payload size
         const chunkPrefetchedInfo: Record<string, any> = {};
         chunk.forEach(t => {
@@ -331,8 +337,8 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
           }
         });
 
-        const currentPayload = { 
-          ...payloadTemplate, 
+        const currentPayload = {
+          ...payloadTemplate,
           tickers: chunk,
           prefetched_info: Object.keys(chunkPrefetchedInfo).length > 0 ? chunkPrefetchedInfo : null
         };
@@ -459,8 +465,8 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
             cellRenderer: (p: any) => {
               const val = p.value || 0;
               const color = val >= 85 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-                            val >= 75 ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30' :
-                            'bg-gray-800 text-gray-400 border border-gray-700';
+                val >= 75 ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30' :
+                  'bg-gray-800 text-gray-400 border border-gray-700';
               return (
                 <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${color}`}>
                   {val} 分
@@ -532,11 +538,11 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   // Export results to CSV
   const handleExportCsv = () => {
     if (filteredResults.length === 0) return;
-    
+
     // Only export columns that are currently visible in the UI (defined in colDefs)
     const exportCols = colDefs.filter((col: any) => col.field);
     const headers = exportCols.map((col: any) => col.headerName || col.field).join(',');
-    
+
     const rows = filteredResults.map(row =>
       exportCols.map((col: any) => {
         const val = row[col.field];
@@ -814,6 +820,28 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                     <label className="text-gray-500 block">曾單日實體大於 (%)</label>
                     <NumericInput value={extMinBodyRet} onChange={setExtMinBodyRet} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
                   </div>
+                  <div>
+                    <label className="text-gray-500 block">昨日收盤價大於 ($)</label>
+                    <NumericInput value={extMinPrevClose} onChange={setExtMinPrevClose} className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 mt-1 text-white" />
+                  </div>
+                  <div>
+                    <label className="text-gray-500 block">收盤價落點 (CLV, 0~1)</label>
+                    <div className="flex space-x-2 mt-1">
+                      <select
+                        value={extClvDirection}
+                        onChange={(e) => setExtClvDirection(e.target.value as '<' | '>')}
+                        className="w-1/3 bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white text-xs"
+                      >
+                        <option value=">">大於 (&gt;)</option>
+                        <option value="<">小於 (&lt;)</option>
+                      </select>
+                      <NumericInput
+                        value={extClvThreshold}
+                        onChange={setExtClvThreshold}
+                        className="w-2/3 bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white"
+                      />
+                    </div>
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="text-[10px] text-gray-500">時間範圍起 (月)</label>
@@ -890,18 +918,18 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
                   <div>
                     <label className="text-gray-500 block">收盤價落點 (CLV, 0~1)</label>
                     <div className="flex space-x-2 mt-1">
-                      <select 
-                        value={fbClvDirection} 
-                        onChange={(e) => setFbClvDirection(e.target.value as '<' | '>')} 
+                      <select
+                        value={fbClvDirection}
+                        onChange={(e) => setFbClvDirection(e.target.value as '<' | '>')}
                         className="w-1/3 bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white text-xs"
                       >
                         <option value=">">大於 (&gt;)</option>
                         <option value="<">小於 (&lt;)</option>
                       </select>
-                      <NumericInput 
-                        value={fbClvThreshold} 
-                        onChange={setFbClvThreshold} 
-                        className="w-2/3 bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white" 
+                      <NumericInput
+                        value={fbClvThreshold}
+                        onChange={setFbClvThreshold}
+                        className="w-2/3 bg-gray-900 border border-gray-800 rounded px-2 py-1 text-white"
                       />
                     </div>
                   </div>

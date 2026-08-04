@@ -553,11 +553,24 @@ def post_scan(req: ScanRequest):
         va_turnover = "N/A"
 
         if req.strategy_select == "1.Extended Short":
-            daily_ret = (df['Close'] / df['Close'].shift(1) - 1) * 100
+            prev_close = df['Close'].shift(1)
+            daily_ret = (df['Close'] / prev_close - 1) * 100
             open_close_ret = (df['Close'] / df['Open'] - 1) * 100
             min_daily_ret = req.hist_cfg.get('min_daily_ret', 90.0)
             min_body_ret = req.hist_cfg.get('min_body_ret', 70.0)
-            valid_mask = (daily_ret >= min_daily_ret) & (open_close_ret >= min_body_ret)
+            min_prev_close = req.hist_cfg.get('min_prev_close', 1.0)
+            
+            range_size = (df['High'] - df['Low']).replace(0, np.nan)
+            clv = ((df['Close'] - df['Low']) / range_size).fillna(0)
+            clv_dir = req.hist_cfg.get('clv_direction', '<')
+            clv_th = req.hist_cfg.get('clv_threshold', 0.2)
+            
+            valid_mask = (daily_ret >= min_daily_ret) & (open_close_ret >= min_body_ret) & (prev_close >= min_prev_close)
+            
+            if clv_dir == '>':
+                valid_mask = valid_mask & (clv >= clv_th)
+            else:
+                valid_mask = valid_mask & (clv <= clv_th)
             
             if 'time_range' in req.hist_cfg:
                 min_m, max_m = req.hist_cfg['time_range']
@@ -590,6 +603,9 @@ def post_scan(req: ScanRequest):
                 ext_date = latest_date_idx.strftime('%Y-%m-%d')
                 ext_ret = float(daily_ret.loc[latest_date_idx])
                 ext_vol = float(df.loc[latest_date_idx, 'Volume']) / 1e6
+                ext_clv = float(clv.loc[latest_date_idx])
+                ext_open_price = float(df.loc[latest_date_idx, 'Open'])
+                ext_close_price = float(df.loc[latest_date_idx, 'Close'])
                 if req.hist_cfg.get('enable_adv'):
                     n_days = req.hist_cfg.get('adv_n_days', 1)
                     future_ret = (df['Close'].shift(-n_days) / df['Close'] - 1) * 100
@@ -775,7 +791,10 @@ def post_scan(req: ScanRequest):
         if req.strategy_select == "1.Extended Short":
             hist_col_name = "歷史暴漲達標"
             row_dict["歷史暴漲日期"] = ext_date
+            row_dict["當日開盤價"] = round(ext_open_price, 2)
+            row_dict["當日收盤價"] = round(ext_close_price, 2)
             row_dict["歷史暴漲幅度(%)"] = round(ext_ret, 2)
+            row_dict["CLV"] = round(ext_clv, 2)
             row_dict["當日Volume(M)"] = round(ext_vol, 2) if ext_vol > 0 else 0
             if req.hist_cfg.get('enable_adv'):
                 row_dict[f"隔{req.hist_cfg.get('adv_n_days', 1)}日漲跌幅(%)"] = adv_ret
