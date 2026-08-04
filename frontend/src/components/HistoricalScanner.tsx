@@ -523,10 +523,15 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   // Export results to CSV
   const handleExportCsv = () => {
     if (filteredResults.length === 0) return;
-    const headers = Object.keys(filteredResults[0]).join(',');
+    
+    // Only export columns that are currently visible in the UI (defined in colDefs)
+    const exportCols = colDefs.filter((col: any) => col.field);
+    const headers = exportCols.map((col: any) => col.headerName || col.field).join(',');
+    
     const rows = filteredResults.map(row =>
-      Object.values(row).map(val => {
-        const str = String(val);
+      exportCols.map((col: any) => {
+        const val = row[col.field];
+        const str = val !== undefined && val !== null ? String(val) : '';
         return str.includes(',') ? `"${str}"` : str;
       }).join(',')
     );
