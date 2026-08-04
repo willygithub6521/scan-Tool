@@ -356,7 +356,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
   };
 
   // Open interactive chart and news for ticker
-  const handleTickerClick = async (ticker: string) => {
+  const handleTickerClick = async (ticker: string, rowData?: any) => {
     setSelectedTicker(ticker);
     setIsChartLoading(true);
     setChartData([]);
@@ -369,9 +369,18 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
       );
       setChartData(histResponse.data.data);
 
+      // Extract trigger date if rowData exists
+      let eventDateParam = '';
+      if (rowData) {
+        const trigDate = rowData["歷史假突破日期"] || rowData["歷史暴漲日期"] || rowData["達標日期"];
+        if (trigDate && typeof trigDate === 'string' && trigDate.length > 0) {
+          eventDateParam = `&event_date=${trigDate}`;
+        }
+      }
+
       // 2. Fetch deep dive news
       const diveResponse = await axios.get(
-        `${BASE_URL}/api/stocks/${ticker}/deep-dive?provider=${dataSource}&api_key=${apiKey}`
+        `${BASE_URL}/api/stocks/${ticker}/deep-dive?provider=${dataSource}&api_key=${apiKey}${eventDateParam}`
       );
       setDeepDiveData(diveResponse.data);
     } catch (err) {
@@ -504,7 +513,7 @@ export const HistoricalScanner: React.FC<HistoricalScannerProps> = ({ apiKey, on
       cellRenderer: (params: any) => (
         <div className="flex h-full w-full items-center justify-center">
           <button
-            onClick={() => handleTickerClick(params.data.Ticker)}
+            onClick={() => handleTickerClick(params.data.Ticker, params.data)}
             className="bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-semibold px-2 py-1.5 rounded-lg flex items-center space-x-1 transition-colors cursor-pointer shadow-sm"
           >
             <span>分析 K 線</span>

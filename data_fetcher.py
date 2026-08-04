@@ -177,8 +177,10 @@ class FMPProvider(DataProvider):
             log_error(f"Error fetching intraday data from FMP for {ticker}: {e}")
             return pd.DataFrame()
 
-    def fetch_news(self, ticker: str, limit: int = 3) -> list:
+    def fetch_news(self, ticker: str, limit: int = 3, event_date: str = None) -> list:
         url = f"https://financialmodelingprep.com/stable/news/stock?symbols={ticker}&apikey={self.api_key}"
+        if event_date:
+            url += f"&to={event_date}"
         try:
             response = requests.get(url)
             data = response.json()
@@ -394,9 +396,9 @@ def get_aftermarket_quote(ticker: str, provider_name: str, api_key: str = "") ->
     return {}
 
 @safe_cache_data(ttl=1800, show_spinner=False)
-def get_stock_news(ticker: str, provider_name: str, api_key: str = "", limit: int = 3) -> list:
+def get_stock_news(ticker: str, provider_name: str, api_key: str = "", limit: int = 3, event_date: str = None) -> list:
     if provider_name == "FMP":
-        return FMPProvider(api_key).fetch_news(ticker, limit)
+        return FMPProvider(api_key).fetch_news(ticker, limit, event_date)
     return []
 
 @safe_cache_data(ttl=600, show_spinner=False)

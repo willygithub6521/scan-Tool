@@ -398,7 +398,8 @@ def get_historical(
 def get_deep_dive(
     ticker: str,
     provider: str = "FMP",
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None,
+    event_date: Optional[str] = None
 ):
     key = api_key or os.environ.get("FMP_API_KEY", "")
     try:
@@ -406,7 +407,7 @@ def get_deep_dive(
         news = []
         if provider == "FMP" and key:
             quote = get_aftermarket_quote(ticker, provider, key)
-            news = get_stock_news(ticker, provider, key, limit=3)
+            news = get_stock_news(ticker, provider, key, limit=3, event_date=event_date)
         return sanitize_value({
             "ticker": ticker,
             "aftermarket_quote": quote,
@@ -538,6 +539,8 @@ def post_scan(req: ScanRequest):
         qm_recent_ret = 0.0
         ext_vol = 0.0
         ext_open_to_high = 0.0
+        ext_open_price = 0.0
+        ext_close_price = 0.0
         ext_close_ret = 0.0
         ext_clv = 0.0
         
@@ -638,6 +641,8 @@ def post_scan(req: ScanRequest):
                 ext_ret = float(gap_up.loc[latest_date_idx])
                 ext_vol = float(df.loc[latest_date_idx, 'Volume']) / 1e6
                 ext_open_to_high = float(open_to_high.loc[latest_date_idx])
+                ext_open_price = float(df.loc[latest_date_idx, 'Open'])
+                ext_close_price = float(df.loc[latest_date_idx, 'Close'])
                 ext_close_ret = float(close_ret.loc[latest_date_idx])
                 ext_clv = float(clv.loc[latest_date_idx])
 
@@ -779,6 +784,8 @@ def post_scan(req: ScanRequest):
             row_dict["歷史假突破日期"] = ext_date
             row_dict["Gap(%)"] = round(ext_ret, 2)
             row_dict["Open To High(%)"] = round(ext_open_to_high, 2)
+            row_dict["當日開盤價"] = round(ext_open_price, 2)
+            row_dict["當日收盤價"] = round(ext_close_price, 2)
             row_dict["收盤漲幅(%)"] = round(ext_close_ret, 2)
             row_dict["CLV"] = round(ext_clv, 2)
             row_dict["當日Volume(M)"] = round(ext_vol, 2) if ext_vol > 0 else 0
